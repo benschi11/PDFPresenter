@@ -60,6 +60,11 @@ public sealed class MainWindow : Window
         Content = new DockPanel { Children = { _header, new Panel { Children = { _view, _picker } } } };
         _view.Notice += ShowNotice;
         _view.DefaultPaper = _settings.Paper;
+        _view.GeoScale = _settings.GeoScale;
+        _view.GeoScaleLocked = _settings.GeoScaleLocked;
+        _view.GeoSnap = _settings.GeoSnap;
+        _view.StatusChanged += SaveGeoSettings;
+        _bar.GeoClicked += () => _view.GeoVisible = !_view.GeoVisible;
         _bar.AddPageClicked += () => _view.InsertPaperPage();
 
         Title = _view.Title;
@@ -148,6 +153,7 @@ public sealed class MainWindow : Window
                     Items =
                     {
                         Item("Stift-Panel", "Tab", () => _picker.IsVisible = !_picker.IsVisible),
+                        BuildGeoMenu(),
                         Item("Kopfbereich ein/aus", "F2", ToggleHeader),
                         Item("Messanzeige", "F1", _view.ToggleHud),
                         Item("Vollbild", "F11", ToggleFullscreen),
@@ -347,7 +353,51 @@ public sealed class MainWindow : Window
         }
     }
 
-    private void RefreshBar() => _bar.Refresh(_picker.Presets, _picker.Current, _view.Tool, _view.PageStatus);
+    private void RefreshBar() => _bar.Refresh(_picker.Presets, _picker.Current, _view.Tool, _view.PageStatus, _view.GeoVisible);
+
+    /// <summary>Größe, Sperre und Einrasten des Geodreiecks merken (nur bei Änderung schreiben).</summary>
+    private void SaveGeoSettings()
+    {
+        double scale = Math.Round(_view.GeoScale, 3);
+        if (scale == _settings.GeoScale && _view.GeoScaleLocked == _settings.GeoScaleLocked && _view.GeoSnap == _settings.GeoSnap)
+            return;
+        _settings.GeoScale = scale;
+        _settings.GeoScaleLocked = _view.GeoScaleLocked;
+        _settings.GeoSnap = _view.GeoSnap;
+        _settings.Save();
+    }
+
+    private MenuItem BuildGeoMenu()
+    {
+        var show = new MenuItem { Header = "_Anzeigen", ToggleType = MenuItemToggleType.CheckBox, InputGesture = KeyGesture.Parse("G") };
+        show.Click += (_, _) => _view.GeoVisible = !_view.GeoVisible;
+        var locked = new MenuItem { Header = "Größe _sperren (kein Pinch)", ToggleType = MenuItemToggleType.CheckBox };
+        locked.Click += (_, _) => _view.GeoScaleLocked = !_view.GeoScaleLocked;
+        var snap = new MenuItem { Header = "Bei 0°/45°/90° _einrasten", ToggleType = MenuItemToggleType.CheckBox };
+        snap.Click += (_, _) => _view.GeoSnap = !_view.GeoSnap;
+        var level = new MenuItem { Header = "Auf 0° aus_richten" };
+        level.Click += (_, _) => _view.ResetGeoAngle();
+
+        var size = new MenuItem { Header = "_Größe" };
+        var sizes = new List<(MenuItem Item, double Scale)>();
+        foreach (var pct in new[] { 50, 75, 100, 125, 150 })
+        {
+            var item = new MenuItem { Header = pct == 100 ? "100 % (Original, 16 cm)" : $"{pct} %", ToggleType = MenuItemToggleType.Radio, GroupName = "geo-size" };
+            item.Click += (_, _) => _view.GeoScale = pct / 100.0;
+            sizes.Add((item, pct / 100.0));
+            size.Items.Add(item);
+        }
+
+        var menu = new MenuItem { Header = "_Geodreieck", Items = { show, new Separator(), size, locked, snap, level } };
+        menu.SubmenuOpened += (_, _) =>
+        {
+            show.IsChecked = _view.GeoVisible;
+            locked.IsChecked = _view.GeoScaleLocked;
+            snap.IsChecked = _view.GeoSnap;
+            foreach (var (item, scale) in sizes) item.IsChecked = Math.Abs(_view.GeoScale - scale) < 0.005;
+        };
+        return menu;
+    }
 
     private void ClosePicker()
     {

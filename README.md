@@ -57,6 +57,18 @@ Papier und Tafel:
 - Abstände sind echte Millimeter der Seite (Karo 5 mm, Linien 8 mm), das Karo ist mittig
   ausgerichtet. Hintergrund/Format gelten für die aktuelle Papierseite und als Vorgabe für neue.
 
+Geodreieck (Taste G, Knopf „Geodreieck“ in der Stiftleiste, Ansicht → Geodreieck):
+- Originalmaße (16 cm Hypotenuse, Skala ±7 cm, Winkelmesser 0–180° mit Gegenskala) in echten
+  Millimetern der Seite, passt also zum Karopapier; Größe 50–150 % im Menü.
+- **Ein Finger** auf dem Geodreieck verschiebt es, ein **zweiter Finger** (irgendwo) dreht es um
+  die Mitte zwischen den Fingern. Pinch-Skalierung nur bei geöffnetem **Schloss** (auf dem
+  Dreieck antippen). Beim Drehen erscheint der Winkel; bei 0°/45°/90° rastet es ein (±2°).
+- Der **Stift bewegt es nie**; setzt der Stift auf, endet eine Geste. Berührungen, solange der
+  Stift in der Nähe ist, gelten als Handballen.
+- Maus: ziehen verschiebt, Umschalt+Rad dreht (5°), Strg+Rad skaliert.
+- Größe, Sperre und Einrasten werden gemerkt; das Geodreieck selbst wird nicht gespeichert
+  oder exportiert. Mit dem Stift am Lineal entlangzeichnen (gerade Linien) folgt in Phase 3.
+
 Speichern und Export:
 - **Speichern** – Dokument mit PDF: Begleitdatei `<datei>.pdf.annot.json` neben dem PDF
   (Striche, eingefügte/gelöschte Seiten; das PDF bleibt unverändert, beim nächsten Öffnen ist

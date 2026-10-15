@@ -36,7 +36,7 @@ Seitentyp mit verschiebbarem/zoombarem Ausschnitt, Striche in Weltkoordinaten, e
 Raster; Export als Ausschnitt um den Inhalt. Gestenkonflikt mit dem Geodreieck klären
 (zwei Finger auf dem Geodreieck = drehen, daneben = Leinwand verschieben).
 
-## Phase 2 – Geodreieck (Grundfunktion)
+## Phase 2 – Geodreieck (Grundfunktion) ✅
 
 - Darstellung wie das echte Geodreieck (Lineal mit Skala ab Mitte, Winkelmesser 0–180°,
   Parallelen), halbtransparent, sichtbar in der Aufnahme.

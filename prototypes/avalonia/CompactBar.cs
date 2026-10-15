@@ -17,12 +17,14 @@ public sealed class CompactBar : Border
 
     private readonly StackPanel _presets = new() { Orientation = Orientation.Horizontal, Spacing = 4 };
     private readonly ToggleButton _eraser = MakeToggle("Radierer");
+    private readonly ToggleButton _geo = MakeToggle("Geodreieck");
     private readonly Button _settings = new() { Content = "⚙ Stift…", Focusable = false, Padding = new Thickness(10, 4) };
     private readonly Button _addPage = new() { Content = "＋ Seite", Focusable = false, Padding = new Thickness(10, 4) };
     private readonly TextBlock _status = new() { VerticalAlignment = VerticalAlignment.Center, Opacity = 0.7, FontSize = 12 };
 
     public event Action<int>? PresetClicked;
     public event Action? EraserClicked;
+    public event Action? GeoClicked;
     public event Action? SettingsClicked;
     public event Action? AddPageClicked;
 
@@ -35,6 +37,8 @@ public sealed class CompactBar : Border
         Padding = new Thickness(6, 3);
 
         _eraser.Click += (_, _) => EraserClicked?.Invoke();
+        _geo.Click += (_, _) => GeoClicked?.Invoke();
+        ToolTip.SetTip(_geo, "Geodreieck ein/aus (G) · 1 Finger verschiebt, 2 Finger drehen");
         _settings.Click += (_, _) => SettingsClicked?.Invoke();
         _addPage.Click += (_, _) => AddPageClicked?.Invoke();
         ToolTip.SetTip(_addPage, "Leeres Blatt nach der aktuellen Seite einfügen");
@@ -45,15 +49,16 @@ public sealed class CompactBar : Border
         {
             Orientation = Orientation.Horizontal,
             Spacing = 10,
-            Children = { _presets, new Border { Width = 1, Background = Brushes.Gray, Opacity = 0.4, Margin = new Thickness(2, 4) }, _eraser, _settings },
+            Children = { _presets, new Border { Width = 1, Background = Brushes.Gray, Opacity = 0.4, Margin = new Thickness(2, 4) }, _eraser, _geo, _settings },
         };
         Child = new DockPanel { Children = { right, left } };
     }
 
     private static ToggleButton MakeToggle(string text) => new() { Content = text, Focusable = false, Padding = new Thickness(10, 4) };
 
-    public void Refresh(IReadOnlyList<PenPreset> presets, PenPreset current, Tool tool, string status)
+    public void Refresh(IReadOnlyList<PenPreset> presets, PenPreset current, Tool tool, string status, bool geoVisible)
     {
+        _geo.IsChecked = geoVisible;
         _presets.Children.Clear();
         for (int i = 0; i < presets.Count; i++)
         {

@@ -98,6 +98,9 @@ public sealed class AppSettings
     public string Format { get; set; } = DocumentFile.FormatName(Paper.Default.Format);
     public string Style { get; set; } = "grid";
     public double SpacingMm { get; set; } = Paper.Default.SpacingMm;
+    public double GeoScale { get; set; } = 1;
+    public bool GeoScaleLocked { get; set; } = true;
+    public bool GeoSnap { get; set; } = true;
 
     private static string FilePath => System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PDFPresenter", "app-settings.json");

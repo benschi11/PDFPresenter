@@ -50,6 +50,16 @@ public sealed class PresenterView : Control
     private bool _touchDraws;
     private double _lastPenSeenMs = double.NegativeInfinity;
 
+    // Geodreieck: Lage in Seiteneinheiten; Finger (Pointer-Id → Seitenposition) der laufenden Geste
+    private GeoPose _geo;
+    private bool _geoVisible;
+    private bool _geoPlaced;
+    private readonly Dictionary<long, Point> _geoPointers = new();
+    private double _geoRawAngle;
+    private Point? _geoTapStart;
+    private bool _geoTapMoved;
+    private double _geoAngleUntilMs;
+
     // Messwerte
     private bool _showHud = true;
     private readonly bool _continuous;
@@ -68,6 +78,44 @@ public sealed class PresenterView : Control
 
     /// <summary>Aktuelle Stifteinstellung (aus dem Stiftauswahl-Panel).</summary>
     public PenPreset Pen { get; set; } = PenStore.DefaultPresets[0];
+
+    public bool GeoVisible
+    {
+        get => _geoVisible;
+        set
+        {
+            if (_geoVisible == value) return;
+            _geoVisible = value;
+            if (!value) EndGeoGesture();
+            StatusChanged?.Invoke();
+            InvalidateVisual();
+        }
+    }
+
+    /// <summary>Größe gesperrt: Zwei-Finger-Geste dreht/verschiebt nur, skaliert nicht.</summary>
+    public bool GeoScaleLocked { get; set { field = value; StatusChanged?.Invoke(); InvalidateVisual(); } } = true;
+
+    /// <summary>Beim Drehen bei 0°/45°/90° … einrasten.</summary>
+    public bool GeoSnap { get; set { field = value; StatusChanged?.Invoke(); } } = true;
+
+    public double GeoScale
+    {
+        get => _geo.Scale is > 0 ? _geo.Scale : 1;
+        set
+        {
+            _geo = _geo with { Scale = Math.Clamp(value, GeoPose.MinScale, GeoPose.MaxScale) };
+            StatusChanged?.Invoke();
+            InvalidateVisual();
+        }
+    }
+
+    /// <summary>Hypotenuse wieder waagrecht ausrichten.</summary>
+    public void ResetGeoAngle()
+    {
+        _geo = _geo with { AngleDeg = 0 };
+        ShowGeoAngle();
+        InvalidateVisual();
+    }
 
     public Tool Tool
     {
@@ -267,6 +315,7 @@ public sealed class PresenterView : Control
             case Key.Home: GoTo(0); break;
             case Key.End: GoTo(int.MaxValue); break;
             case Key.E: _tool = _tool == Tool.Eraser ? Tool.Draw : Tool.Eraser; break;
+            case Key.G: GeoVisible = !GeoVisible; break;
             case Key.C: ClearPage(); break;
             case Key.Z when ctrl: Undo(); break;
             case Key.T: _touchDraws = !_touchDraws; break;
@@ -319,6 +368,14 @@ public sealed class PresenterView : Control
         var pt = e.GetCurrentPoint(this);
         NotePointer(e.Pointer.Type, pt.Properties.Pressure, now);
 
+        // Der Stift bewegt das Geodreieck nie; setzt er auf, endet eine laufende Geste.
+        if (e.Pointer.Type == PointerType.Pen) EndGeoGesture();
+        else if (TryStartGeoGesture(e, pt, now))
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (_deck is null || !Accept(e.Pointer.Type, now)) return;
 
         // Stift setzt auf, während ein Finger-/Handballenstrich läuft → den verwerfen.
@@ -360,6 +417,13 @@ public sealed class PresenterView : Control
         if (_tool == Tool.Eraser || current.Properties.IsEraser) _eraserPos = current.Position;
         else if (e.Pointer.Type == PointerType.Pen) _eraserPos = null;
 
+        if (_geoPointers.ContainsKey(e.Pointer.Id))
+        {
+            UpdateGeoGesture(e.Pointer.Id, current.Position, now);
+            e.Handled = true;
+            return;
+        }
+
         if (_activePointerId != e.Pointer.Id) return;
 
         // Zwischenpunkte: Windows liefert Stiftdaten mit höherer Rate als Frames.
@@ -377,6 +441,12 @@ public sealed class PresenterView : Control
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
         base.OnPointerReleased(e);
+        if (EndGeoPointer(e.Pointer.Id, e.GetPosition(this)))
+        {
+            e.Pointer.Capture(null);
+            e.Handled = true;
+            return;
+        }
         if (_activePointerId != e.Pointer.Id) return;
         CommitActiveStroke();
         e.Pointer.Capture(null);
@@ -386,6 +456,7 @@ public sealed class PresenterView : Control
     protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
     {
         base.OnPointerCaptureLost(e);
+        if (_geoPointers.Remove(e.Pointer.Id)) InvalidateVisual();
         if (_activePointerId == e.Pointer.Id) CommitActiveStroke();
     }
 
@@ -485,6 +556,153 @@ public sealed class PresenterView : Control
     {
         var d = DestDip(page);
         return Matrix.CreateScale(d.Height, d.Height) * Matrix.CreateTranslation(d.X, d.Y);
+    }
+
+    // ─────────────────────────────── Geodreieck ───────────────────────────────
+
+    private static double PageUnitsPerMm(Page page) => Paper.PtPerMm / page.SizePt.Height;
+
+    /// <summary>lokale mm-Koordinaten des Geodreiecks → Bildschirm (DIP)</summary>
+    private Matrix GeoToScreen(Page page) => GeoMath.LocalToPage(_geo, PageUnitsPerMm(page)) * PageToScreen(page);
+
+    private Point? ScreenToGeo(Point screen)
+    {
+        if (CurrentPage is not { } page) return null;
+        var m = GeoToScreen(page);
+        return m.TryInvert(out var inv) ? screen.Transform(inv) : null;
+    }
+
+    private bool GeoHit(Point screen) => _geoVisible && ScreenToGeo(screen) is { } local && GeoMath.Contains(local, marginMm: 3);
+
+    /// <summary>Beim ersten Einblenden bzw. wenn es außerhalb der Seite liegt: mittig auf die Seite legen.</summary>
+    private void EnsureGeoPlaced(Page page)
+    {
+        double aspect = page.SizePt.Width / page.SizePt.Height;
+        var c = _geo.Center;
+        if (_geoPlaced && c.X >= 0 && c.X <= aspect && c.Y >= 0 && c.Y <= 1) return;
+        double height = GeoMath.HalfMm * PageUnitsPerMm(page) * GeoScale;
+        _geo = new GeoPose(new Point(aspect / 2, 0.5 + height / 2), _geoPlaced ? _geo.AngleDeg : 0, GeoScale);
+        _geoPlaced = true;
+    }
+
+    private bool TryStartGeoGesture(PointerPressedEventArgs e, PointerPoint pt, double now)
+    {
+        if (!_geoVisible || CurrentPage is null) return false;
+        var type = e.Pointer.Type;
+        // Handballen: Berührungen, solange der Stift in der Nähe ist, bewegen nichts
+        if (type == PointerType.Touch && now - _lastPenSeenMs <= PalmRejectMs) return false;
+        if (type == PointerType.Mouse && !pt.Properties.IsLeftButtonPressed) return false;
+
+        // Zweiter Finger darf irgendwo aufsetzen, sobald einer das Dreieck hält → Drehen
+        bool secondFinger = type == PointerType.Touch && _geoPointers.Count == 1;
+        if (!secondFinger && !GeoHit(pt.Position)) return false;
+        if (_geoPointers.Count >= 2) return true; // weitere Finger schlucken
+
+        _geoPointers[e.Pointer.Id] = ScreenToPage(pt.Position);
+        _geoRawAngle = _geo.AngleDeg;
+        if (_geoPointers.Count == 1)
+        {
+            _geoTapStart = pt.Position;
+            _geoTapMoved = false;
+        }
+        else
+        {
+            _geoTapStart = null;
+            ShowGeoAngle();
+        }
+        e.Pointer.Capture(this);
+        // Ein Strich desselben Fingers darf nicht weiterlaufen
+        if (_activePointerId == e.Pointer.Id) _active = null;
+        return true;
+    }
+
+    private void UpdateGeoGesture(long id, Point screen, double now)
+    {
+        var to = ScreenToPage(screen);
+        var from = _geoPointers[id];
+        if (_geoPointers.Count == 1)
+        {
+            _geo = GeoMath.Translate(_geo, from, to);
+        }
+        else
+        {
+            var other = _geoPointers.First(kv => kv.Key != id).Value;
+            var pose = GeoMath.TwoFinger(_geo, ref _geoRawAngle, from, other, to, other, allowScale: !GeoScaleLocked);
+            _geo = pose with { AngleDeg = GeoSnap ? GeoMath.Snap(_geoRawAngle) : _geoRawAngle };
+            ShowGeoAngle();
+        }
+        _geoPointers[id] = to;
+        if (_geoTapStart is { } start && Distance(start, screen) > 6) _geoTapMoved = true;
+        InvalidateVisual();
+    }
+
+    /// <summary>Finger/Maus loslassen. Kurzes Antippen des Schlosses schaltet die Größensperre.</summary>
+    private bool EndGeoPointer(long id, Point screen)
+    {
+        if (!_geoPointers.Remove(id)) return false;
+        if (_geoTapStart is { } start && !_geoTapMoved && _geoPointers.Count == 0
+            && ScreenToGeo(start) is { } local && Distance(local, GeoRenderer.LockCenterMm) <= GeoRenderer.LockRadiusMm)
+            GeoScaleLocked = !GeoScaleLocked;
+        if (_geoPointers.Count == 0) _geoTapStart = null;
+        _geoRawAngle = _geo.AngleDeg;
+        InvalidateVisual();
+        return true;
+    }
+
+    private void EndGeoGesture()
+    {
+        if (_geoPointers.Count == 0) return;
+        _geoPointers.Clear();
+        _geoTapStart = null;
+        InvalidateVisual();
+    }
+
+    private void ShowGeoAngle()
+    {
+        _geoAngleUntilMs = _clock.Elapsed.TotalMilliseconds + 1200;
+        DispatcherTimer.RunOnce(InvalidateVisual, TimeSpan.FromMilliseconds(1300));
+    }
+
+    private static double Distance(Point a, Point b) => Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
+
+    /// <summary>Maus: Shift+Rad dreht (5°-Schritte), Strg+Rad skaliert – jeweils über dem Geodreieck.</summary>
+    protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
+    {
+        base.OnPointerWheelChanged(e);
+        if (!GeoHit(e.GetPosition(this))) return;
+        double delta = e.Delta.Y != 0 ? e.Delta.Y : e.Delta.X;
+        if (delta == 0) return;
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+        {
+            double angle = _geo.AngleDeg - Math.Sign(delta) * 5;
+            _geo = _geo with { AngleDeg = GeoSnap ? GeoMath.Snap(angle) : angle };
+            ShowGeoAngle();
+        }
+        else if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            GeoScale = GeoScale * (delta > 0 ? 1.05 : 1 / 1.05);
+        }
+        else return;
+        InvalidateVisual();
+        e.Handled = true;
+    }
+
+    private void DrawGeo(DrawingContext ctx, Page page, double now)
+    {
+        EnsureGeoPlaced(page);
+        var toScreen = GeoToScreen(page);
+        double mmToScreen = PageUnitsPerMm(page) * GeoScale * DestDip(page).Height;
+        GeoRenderer.Draw(ctx, toScreen, mmToScreen, GeoScaleLocked);
+
+        // Winkelanzeige beim Drehen (Winkel der Hypotenuse, mathematisch positiv)
+        if (_geoPointers.Count >= 2 || now < _geoAngleUntilMs)
+        {
+            var text = MakeText(string.Create(CultureInfo.InvariantCulture, $"{_geo.MathAngle:0}°"), 20);
+            var apex = new Point(0, -GeoMath.HalfMm - 8).Transform(toScreen);
+            var box = new Rect(apex.X - text.Width / 2 - 10, apex.Y - text.Height / 2 - 4, text.Width + 20, text.Height + 8);
+            ctx.DrawRectangle(new SolidColorBrush(Color.FromArgb(0xD0, 0x16, 0x3A, 0x5C)), null, box, 8, 8);
+            ctx.DrawText(text, new Point(box.X + 10, box.Y + 4));
+        }
     }
 
     // ───────────────────────────── Seiten-Bitmaps ─────────────────────────────
@@ -659,6 +877,7 @@ public sealed class PresenterView : Control
             ctx.DrawEllipse(null, new Pen(Brushes.Gray, 1), ep, r, r);
         }
 
+        if (_geoVisible) DrawGeo(ctx, current, now);
         if (_showHud) DrawHud(ctx, now);
     }
 
