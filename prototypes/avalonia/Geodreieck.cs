@@ -84,9 +84,69 @@ public static class GeoMath
         * Matrix.CreateRotation(pose.AngleDeg * Math.PI / 180)
         * Matrix.CreateTranslation(pose.Center.X, pose.Center.Y);
 
+    /// <summary>Kanten in lokalen mm: Hypotenuse, linker und rechter Schenkel.</summary>
+    public static readonly (Point A, Point B)[] Edges =
+    [
+        (new Point(-HalfMm, 0), new Point(HalfMm, 0)),
+        (new Point(-HalfMm, 0), new Point(0, -HalfMm)),
+        (new Point(HalfMm, 0), new Point(0, -HalfMm)),
+    ];
+
+    /// <summary>
+    /// Sucht die Kante, an der der Stift ansetzt (Abstand höchstens <paramref name="maxDistance"/>
+    /// in Seiteneinheiten, Fußpunkt innerhalb der Kante). Liefert die Führung oder null.
+    /// </summary>
+    public static RulerGuide? FindGuide(GeoPose pose, double pageUnitsPerMm, Point pagePoint, double maxDistance)
+    {
+        var m = LocalToPage(pose, pageUnitsPerMm);
+        double unitsPerMm = pageUnitsPerMm * pose.Scale;
+        RulerGuide? best = null;
+        double bestDist = maxDistance;
+        foreach (var (la, lb) in Edges)
+        {
+            var a = la.Transform(m);
+            var b = lb.Transform(m);
+            var d = b - a;
+            double len = Math.Sqrt(d.X * d.X + d.Y * d.Y);
+            var dir = d / len;
+            var rel = pagePoint - a;
+            double t = rel.X * dir.X + rel.Y * dir.Y;
+            if (t < -2 * unitsPerMm || t > len + 2 * unitsPerMm) continue;
+            double cross = dir.X * rel.Y - dir.Y * rel.X; // vorzeichenbehafteter Abstand
+            if (Math.Abs(cross) > bestDist) continue;
+            bestDist = Math.Abs(cross);
+            // Normale zeigt zur Seite, auf der der Stift ansetzt
+            var normal = new Vector(-dir.Y, dir.X) * (cross >= 0 ? 1 : -1);
+            best = new RulerGuide(a, dir, normal, len, unitsPerMm);
+        }
+        return best;
+    }
+
     /// <summary>Liegt der lokale Punkt (mm) im Dreieck (mit Rand <paramref name="marginMm"/>)?</summary>
     public static bool Contains(Point local, double marginMm = 0) =>
         local.Y <= marginMm && local.Y >= -HalfMm - marginMm && Math.Abs(local.X) <= HalfMm + local.Y + marginMm * 1.5;
+}
+
+/// <summary>
+/// Führung an einer Kante des Geodreiecks (in Seiteneinheiten). Positionen entlang der Kante
+/// rasten auf ganze Millimeter der Lineal-Skala ein und bleiben innerhalb der Kante.
+/// </summary>
+public readonly record struct RulerGuide(Point A, Vector Dir, Vector Normal, double Length, double UnitsPerMm)
+{
+    /// <summary>Position entlang der Kante (Seiteneinheiten ab A), eingerastet auf ganze mm.</summary>
+    public double Along(Point p)
+    {
+        var rel = p - A;
+        double t = rel.X * Dir.X + rel.Y * Dir.Y;
+        t = Math.Round(t / UnitsPerMm) * UnitsPerMm;
+        return Math.Clamp(t, 0, Length);
+    }
+
+    /// <summary>Punkt auf der Kante, um <paramref name="offset"/> zur Stiftseite versetzt.</summary>
+    public Point At(double along, double offset) => A + Dir * along + Normal * offset;
+
+    /// <summary>Abstand zweier Positionen in mm der Lineal-Skala.</summary>
+    public double Millimetres(double from, double to) => Math.Abs(to - from) / UnitsPerMm;
 }
 
 /// <summary>Zeichnet das Geodreieck (Vektor, jeden Frame; Geometrie wird zwischengespeichert).</summary>

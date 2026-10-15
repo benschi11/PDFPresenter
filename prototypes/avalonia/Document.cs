@@ -101,6 +101,7 @@ public sealed class AppSettings
     public double GeoScale { get; set; } = 1;
     public bool GeoScaleLocked { get; set; } = true;
     public bool GeoSnap { get; set; } = true;
+    public bool GeoRuler { get; set; } = true;
 
     private static string FilePath => System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PDFPresenter", "app-settings.json");

@@ -59,6 +59,9 @@ public sealed class PresenterView : Control
     private Point? _geoTapStart;
     private bool _geoTapMoved;
     private double _geoAngleUntilMs;
+    // Lineal-Führung des aktiven Strichs (Stift setzt an einer Kante an)
+    private RulerGuide? _ruler;
+    private double _rulerStart;
 
     // Messwerte
     private bool _showHud = true;
@@ -94,6 +97,9 @@ public sealed class PresenterView : Control
 
     /// <summary>Größe gesperrt: Zwei-Finger-Geste dreht/verschiebt nur, skaliert nicht.</summary>
     public bool GeoScaleLocked { get; set { field = value; StatusChanged?.Invoke(); InvalidateVisual(); } } = true;
+
+    /// <summary>Stift wird an den Kanten des Geodreiecks geführt (gerade Linien, exakte Längen).</summary>
+    public bool GeoRuler { get; set { field = value; StatusChanged?.Invoke(); } } = true;
 
     /// <summary>Beim Drehen bei 0°/45°/90° … einrasten.</summary>
     public bool GeoSnap { get; set { field = value; StatusChanged?.Invoke(); } } = true;
@@ -401,6 +407,7 @@ public sealed class PresenterView : Control
         else
         {
             _active = new Stroke(Pen.ToColor(), Pen.PageWidth, Pen.Highlighter);
+            StartRuler(pt.Position);
             AddPoint(pt);
         }
         _pendingInputMs = double.IsNaN(_pendingInputMs) ? now : _pendingInputMs;
@@ -472,6 +479,18 @@ public sealed class PresenterView : Control
         if (_active is null || _deck is null) return;
         var p = ScreenToPage(pt.Position);
         float pressure = pt.Pointer.Type == PointerType.Mouse ? 0.5f : pt.Properties.Pressure;
+        if (_ruler is { } guide)
+        {
+            // Am Lineal: nur Anfangs- und Endpunkt, beide auf der Kante (knapp außen anliegend)
+            double offset = _active.Width / 2;
+            float maxPressure = Math.Max(pressure, _active.Points.Count > 0 ? _active.Points[0].Pressure : 0);
+            var start = guide.At(_rulerStart, offset);
+            var end = guide.At(guide.Along(p), offset);
+            _active.Points.Clear();
+            _active.Points.Add(new InkPoint(start.X, start.Y, maxPressure));
+            if (end != start) _active.Points.Add(new InkPoint(end.X, end.Y, maxPressure));
+            return;
+        }
         // gleicher Ort wie zuvor (z. B. Druck-Update ohne Bewegung): nur Druck übernehmen
         if (_active.Points.Count > 0 && _active.Points[^1] is var last && last.X == p.X && last.Y == p.Y)
         {
@@ -485,6 +504,7 @@ public sealed class PresenterView : Control
     {
         var stroke = _active;
         _active = null;
+        _ruler = null;
         _activePointerId = null;
         _erasing = false;
         if (stroke is null || stroke.Points.Count == 0 || CurrentPage is not { } page) return;
@@ -572,7 +592,24 @@ public sealed class PresenterView : Control
         return m.TryInvert(out var inv) ? screen.Transform(inv) : null;
     }
 
-    private bool GeoHit(Point screen) => _geoVisible && ScreenToGeo(screen) is { } local && GeoMath.Contains(local, marginMm: 3);
+    /// <summary>Trifft der Punkt das Geodreieck? Finger mit großzügigem Rand, Maus nur innen
+    /// (damit sie direkt an der Außenkante entlang zeichnen kann).</summary>
+    private bool GeoHit(Point screen, double marginMm = 3) =>
+        _geoVisible && ScreenToGeo(screen) is { } local && GeoMath.Contains(local, marginMm);
+
+    /// <summary>Setzt der Stift an einer Kante an (≤ 10 px), wird der Strich daran geführt.</summary>
+    private void StartRuler(Point screen)
+    {
+        _ruler = null;
+        if (!_geoVisible || !GeoRuler || CurrentPage is not { } page) return;
+        double maxDistance = 10 / DestDip(page).Height; // 10 DIP in Seiteneinheiten
+        var p = ScreenToPage(screen);
+        if (GeoMath.FindGuide(_geo, PageUnitsPerMm(page), p, maxDistance) is { } guide)
+        {
+            _ruler = guide;
+            _rulerStart = guide.Along(p);
+        }
+    }
 
     /// <summary>Beim ersten Einblenden bzw. wenn es außerhalb der Seite liegt: mittig auf die Seite legen.</summary>
     private void EnsureGeoPlaced(Page page)
@@ -595,7 +632,7 @@ public sealed class PresenterView : Control
 
         // Zweiter Finger darf irgendwo aufsetzen, sobald einer das Dreieck hält → Drehen
         bool secondFinger = type == PointerType.Touch && _geoPointers.Count == 1;
-        if (!secondFinger && !GeoHit(pt.Position)) return false;
+        if (!secondFinger && !GeoHit(pt.Position, type == PointerType.Mouse ? 0 : 3)) return false;
         if (_geoPointers.Count >= 2) return true; // weitere Finger schlucken
 
         _geoPointers[e.Pointer.Id] = ScreenToPage(pt.Position);
@@ -703,6 +740,20 @@ public sealed class PresenterView : Control
             ctx.DrawRectangle(new SolidColorBrush(Color.FromArgb(0xD0, 0x16, 0x3A, 0x5C)), null, box, 8, 8);
             ctx.DrawText(text, new Point(box.X + 10, box.Y + 4));
         }
+    }
+
+    /// <summary>Länge der am Lineal gezogenen Strecke neben dem Endpunkt („4,3 cm“).</summary>
+    private void DrawRulerLength(DrawingContext ctx, RulerGuide ruler, Page page)
+    {
+        var last = _active!.Points[^1];
+        double end = ruler.Along(new Point(last.X, last.Y));
+        double cm = ruler.Millimetres(_rulerStart, end) / 10;
+        var text = MakeText(cm.ToString("0.0", CultureInfo.GetCultureInfo("de-AT")) + " cm", 18);
+        // etwas von der Kante weg auf die Stiftseite, damit der Stift das Etikett nicht verdeckt
+        var anchor = (new Point(last.X, last.Y) + ruler.Normal * (24 / DestDip(page).Height)).Transform(PageToScreen(page));
+        var box = new Rect(anchor.X - text.Width / 2 - 8, anchor.Y - text.Height / 2 - 3, text.Width + 16, text.Height + 6);
+        ctx.DrawRectangle(new SolidColorBrush(Color.FromArgb(0xD0, 0x16, 0x3A, 0x5C)), null, box, 6, 6);
+        ctx.DrawText(text, new Point(box.X + 8, box.Y + 3));
     }
 
     // ───────────────────────────── Seiten-Bitmaps ─────────────────────────────
@@ -878,6 +929,7 @@ public sealed class PresenterView : Control
         }
 
         if (_geoVisible) DrawGeo(ctx, current, now);
+        if (_ruler is { } ruler && _active is { Points.Count: > 0 }) DrawRulerLength(ctx, ruler, current);
         if (_showHud) DrawHud(ctx, now);
     }
 

@@ -65,9 +65,14 @@ Geodreieck (Taste G, Knopf „Geodreieck“ in der Stiftleiste, Ansicht → Geod
   Dreieck antippen). Beim Drehen erscheint der Winkel; bei 0°/45°/90° rastet es ein (±2°).
 - Der **Stift bewegt es nie**; setzt der Stift auf, endet eine Geste. Berührungen, solange der
   Stift in der Nähe ist, gelten als Handballen.
-- Maus: ziehen verschiebt, Umschalt+Rad dreht (5°), Strg+Rad skaliert.
-- Größe, Sperre und Einrasten werden gemerkt; das Geodreieck selbst wird nicht gespeichert
-  oder exportiert. Mit dem Stift am Lineal entlangzeichnen (gerade Linien) folgt in Phase 3.
+- Maus: ziehen (im Inneren) verschiebt, Umschalt+Rad dreht (5°), Strg+Rad skaliert; direkt an
+  der Außenkante zeichnet die Maus am Lineal entlang.
+- **Lineal:** Setzt der Stift an einer Kante an (Hypotenuse oder Schenkel, ≤ 10 px), wird der
+  Strich exakt an der Kante geführt – gerade, knapp außen anliegend, Anfang und Ende auf ganze
+  Millimeter eingerastet und nicht über die Kante hinaus. Ein Etikett zeigt die Länge
+  („4,3 cm“). Abschaltbar unter Ansicht → Geodreieck → Am Lineal entlang zeichnen.
+- Größe, Sperre, Einrasten und Lineal-Führung werden gemerkt; das Geodreieck selbst wird nicht
+  gespeichert oder exportiert (die damit gezogenen Linien natürlich schon).
 
 Speichern und Export:
 - **Speichern** – Dokument mit PDF: Begleitdatei `<datei>.pdf.annot.json` neben dem PDF

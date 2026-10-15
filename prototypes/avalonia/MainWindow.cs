@@ -63,6 +63,7 @@ public sealed class MainWindow : Window
         _view.GeoScale = _settings.GeoScale;
         _view.GeoScaleLocked = _settings.GeoScaleLocked;
         _view.GeoSnap = _settings.GeoSnap;
+        _view.GeoRuler = _settings.GeoRuler;
         _view.StatusChanged += SaveGeoSettings;
         _bar.GeoClicked += () => _view.GeoVisible = !_view.GeoVisible;
         _bar.AddPageClicked += () => _view.InsertPaperPage();
@@ -359,8 +360,10 @@ public sealed class MainWindow : Window
     private void SaveGeoSettings()
     {
         double scale = Math.Round(_view.GeoScale, 3);
-        if (scale == _settings.GeoScale && _view.GeoScaleLocked == _settings.GeoScaleLocked && _view.GeoSnap == _settings.GeoSnap)
+        if (scale == _settings.GeoScale && _view.GeoScaleLocked == _settings.GeoScaleLocked
+            && _view.GeoSnap == _settings.GeoSnap && _view.GeoRuler == _settings.GeoRuler)
             return;
+        _settings.GeoRuler = _view.GeoRuler;
         _settings.GeoScale = scale;
         _settings.GeoScaleLocked = _view.GeoScaleLocked;
         _settings.GeoSnap = _view.GeoSnap;
@@ -375,6 +378,8 @@ public sealed class MainWindow : Window
         locked.Click += (_, _) => _view.GeoScaleLocked = !_view.GeoScaleLocked;
         var snap = new MenuItem { Header = "Bei 0°/45°/90° _einrasten", ToggleType = MenuItemToggleType.CheckBox };
         snap.Click += (_, _) => _view.GeoSnap = !_view.GeoSnap;
+        var ruler = new MenuItem { Header = "Am _Lineal entlang zeichnen", ToggleType = MenuItemToggleType.CheckBox };
+        ruler.Click += (_, _) => _view.GeoRuler = !_view.GeoRuler;
         var level = new MenuItem { Header = "Auf 0° aus_richten" };
         level.Click += (_, _) => _view.ResetGeoAngle();
 
@@ -388,12 +393,13 @@ public sealed class MainWindow : Window
             size.Items.Add(item);
         }
 
-        var menu = new MenuItem { Header = "_Geodreieck", Items = { show, new Separator(), size, locked, snap, level } };
+        var menu = new MenuItem { Header = "_Geodreieck", Items = { show, new Separator(), size, locked, snap, ruler, level } };
         menu.SubmenuOpened += (_, _) =>
         {
             show.IsChecked = _view.GeoVisible;
             locked.IsChecked = _view.GeoScaleLocked;
             snap.IsChecked = _view.GeoSnap;
+            ruler.IsChecked = _view.GeoRuler;
             foreach (var (item, scale) in sizes) item.IsChecked = Math.Abs(_view.GeoScale - scale) < 0.005;
         };
         return menu;
