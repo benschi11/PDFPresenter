@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>Kreidezeit</title>
+  <defs>
+    <linearGradient id="kz-board" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2F6D5B"/>
+      <stop offset="1" stop-color="#173A31"/>
+    </linearGradient>
+    <linearGradient id="kz-flap" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8CC3AE"/>
+      <stop offset="1" stop-color="#4E8A76"/>
+    </linearGradient>
+  </defs>
+  <!-- Tafel als PDF-Seite mit Eselsohr -->
+  <path fill="url(#kz-board)" d="M128 32H360L480 152V384A96 96 0 0 1 384 480H128A96 96 0 0 1 32 384V128A96 96 0 0 1 128 32Z"/>
+  <path fill="url(#kz-flap)" d="M360 32L480 152H396A36 36 0 0 1 360 116Z"/>
+  <!-- Kreidestrich: Funktionsgraph -->
+  <path d="M100 336 C150 140 232 140 262 258 S366 392 404 236" fill="none" stroke="#F5F1E6" stroke-opacity=".1" stroke-width="48" stroke-linecap="round"/>
+  <path d="M100 336 C150 140 232 140 262 258 S366 392 404 236" fill="none" stroke="#F5F1E6" stroke-width="26" stroke-linecap="round"/>
+  <!-- Kreidestück am Ende des Strichs -->
+  <g transform="translate(404 236) rotate(32)">
+    <rect x="-18" y="-104" width="36" height="104" rx="9" fill="#F7D46B"/>
+    <rect x="-18" y="-104" width="12" height="104" rx="6" fill="#FFF2C2" opacity=".7"/>
+    <path d="M-18 -18H18V-9A9 9 0 0 1 9 0H-9A9 9 0 0 1 -18 -9Z" fill="#F5F1E6"/>
+  </g>
+  <!-- Folien-Fortschritt -->
+  <circle cx="204" cy="420" r="11" fill="#F5F1E6" opacity=".35"/>
+  <circle cx="256" cy="420" r="11" fill="#F5F1E6" opacity=".35"/>
+  <rect x="290" y="409" width="54" height="22" rx="11" fill="#F7D46B"/>
+</svg>
