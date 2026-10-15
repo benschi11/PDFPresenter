@@ -33,6 +33,8 @@ public static class DocumentFile
         public string? Format { get; set; }
         public string? Style { get; set; }
         public double? SpacingMm { get; set; }
+        /// <summary>Ausschnitt der unendlichen Leinwand: [Offset x, Offset y, Zoom].</summary>
+        public double[]? View { get; set; }
         public List<StrokeDto> Strokes { get; set; } = [];
     }
 
@@ -94,6 +96,8 @@ public static class DocumentFile
                 dto.Format = FormatName(p.Paper.Format);
                 dto.Style = StyleName(p.Paper.Style);
                 dto.SpacingMm = p.Paper.SpacingMm;
+                if (p.Paper.IsInfinite)
+                    dto.View = [Math.Round(p.View.Offset.X, 5), Math.Round(p.View.Offset.Y, 5), Math.Round(p.View.Zoom, 4)];
                 break;
         }
         return dto;
@@ -145,7 +149,12 @@ public static class DocumentFile
         {
             "pdf" when pdf is not null && dto.PdfPage is { } n && n >= 1 && n <= pdf.PageCount
                 => new PdfPage(n - 1, pdf.PageSizes[n - 1]),
-            "paper" => new PaperPage(ParsePaper(dto.Format, dto.Style, dto.SpacingMm)),
+            "paper" => new PaperPage(ParsePaper(dto.Format, dto.Style, dto.SpacingMm))
+            {
+                View = dto.View is [var x, var y, var z] && z > 0
+                    ? new CanvasView(new Vector(x, y), Math.Clamp(z, CanvasView.MinZoom, CanvasView.MaxZoom))
+                    : CanvasView.Identity,
+            },
             _ => null, // unbekannter Typ oder PDF-Seite ohne PDF: überspringen
         };
         page?.Strokes.AddRange(dto.Strokes.Select(FromDto));
@@ -172,6 +181,7 @@ public static class DocumentFile
     {
         PageFormat.A4Portrait => "a4-hoch",
         PageFormat.A4Landscape => "a4-quer",
+        PageFormat.Infinite => "unendlich",
         _ => "16:9",
     };
 
@@ -179,6 +189,7 @@ public static class DocumentFile
     {
         "a4-hoch" => PageFormat.A4Portrait,
         "a4-quer" => PageFormat.A4Landscape,
+        "unendlich" => PageFormat.Infinite,
         _ => PageFormat.Wide16x9,
     };
 

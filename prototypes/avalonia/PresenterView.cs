@@ -59,12 +59,15 @@ public sealed class PresenterView : Control
     private Point? _geoTapStart;
     private bool _geoTapMoved;
     private double _geoAngleUntilMs;
+    // Unendliche Leinwand: Finger (Id → Bildschirmposition) bzw. Maus beim Verschieben/Zoomen
+    private readonly Dictionary<long, Point> _panPointers = new();
+
     // Wischen zum Blättern (ein Finger, nicht zeichnend)
     private (long Id, Point Start, double StartMs)? _swipe;
     private bool _swipeCancelled;
     // Lineal-Führung des aktiven Strichs (Stift setzt an einer Kante an)
     private RulerGuide? _ruler;
-    private double _rulerStart;
+    private double _rulerStart, _rulerEnd;
     // Winkel antragen: Strahl vom Nullpunkt des Geodreiecks
     private AngleGuide? _angleGuide;
     private (double AngleDeg, double LengthMm) _angleReading;
@@ -306,7 +309,7 @@ public sealed class PresenterView : Control
 
         _fromPage = _deck.Pages[_page];
         _page = page;
-        if (_pageBitmaps.ContainsKey(_deck.Pages[page])) StartFade();
+        if (IsInfinite(_deck.Pages[page]) || _pageBitmaps.ContainsKey(_deck.Pages[page])) StartFade();
         else _fadePending = true; // Überblendung startet, sobald die Seite gerendert ist
 
         RequestPages();
@@ -412,7 +415,12 @@ public sealed class PresenterView : Control
             return;
         }
 
-        if (e.Pointer.Type == PointerType.Touch) TrackSwipe(e.Pointer.Id, pt.Position, now);
+        if (TryStartPan(e, pt, now))
+        {
+            e.Handled = true;
+            return;
+        }
+        if (e.Pointer.Type == PointerType.Touch && !IsInfinite(CurrentPage)) TrackSwipe(e.Pointer.Id, pt.Position, now);
 
         if (_deck is null || !Accept(e.Pointer.Type, now)) return;
 
@@ -438,7 +446,8 @@ public sealed class PresenterView : Control
         }
         else
         {
-            _active = new Stroke(Pen.ToColor(), Pen.PageWidth, Pen.Highlighter);
+            // Breite in Welteinheiten, damit der Strich beim aktuellen Zoom die gewählte Stärke hat
+            _active = new Stroke(Pen.ToColor(), Pen.PageWidth / ViewOf(CurrentPage).Zoom, Pen.Highlighter);
             StartRuler(pt.Position);
             AddPoint(pt);
         }
@@ -456,6 +465,12 @@ public sealed class PresenterView : Control
         if (_tool == Tool.Eraser || current.Properties.IsEraser) _eraserPos = current.Position;
         else if (e.Pointer.Type == PointerType.Pen) _eraserPos = null;
 
+        if (_panPointers.ContainsKey(e.Pointer.Id))
+        {
+            UpdatePan(e.Pointer.Id, current.Position);
+            e.Handled = true;
+            return;
+        }
         if (_geoPointers.ContainsKey(e.Pointer.Id))
         {
             UpdateGeoGesture(e.Pointer.Id, current.Position, now);
@@ -480,6 +495,12 @@ public sealed class PresenterView : Control
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
         base.OnPointerReleased(e);
+        if (_panPointers.Remove(e.Pointer.Id))
+        {
+            e.Pointer.Capture(null);
+            e.Handled = true;
+            return;
+        }
         if (_swipe is { } sw && sw.Id == e.Pointer.Id)
         {
             _swipe = null;
@@ -508,6 +529,7 @@ public sealed class PresenterView : Control
     {
         base.OnPointerCaptureLost(e);
         if (_geoPointers.Remove(e.Pointer.Id)) InvalidateVisual();
+        _panPointers.Remove(e.Pointer.Id);
         if (_activePointerId == e.Pointer.Id) CommitActiveStroke();
     }
 
@@ -520,30 +542,33 @@ public sealed class PresenterView : Control
 
     private void AddPoint(PointerPoint pt)
     {
-        if (_active is null || _deck is null) return;
-        var p = ScreenToPage(pt.Position);
+        if (_active is null || _deck is null || CurrentPage is not { } page) return;
+        var frame = ScreenToPage(pt.Position);      // Rahmen-/Seiteneinheiten (Geodreieck rechnet hier)
+        var p = ToWorld(page, frame);               // gespeichert wird in Weltkoordinaten
         float pressure = pt.Pointer.Type == PointerType.Mouse ? 0.5f : pt.Properties.Pressure;
+        InkPoint World(Point f, float pr) { var w = ToWorld(page, f); return new InkPoint(w.X, w.Y, pr); }
         if (_angleGuide is { } ag)
         {
             // Winkel antragen: Strahl vom Nullpunkt in eingerasteter Richtung und Länge
             float pr = Math.Max(pressure, _active.Points.Count > 0 ? _active.Points[0].Pressure : 0);
-            var (end, angle, mm) = ag.Resolve(p);
+            var (end, angle, mm) = ag.Resolve(frame);
             _angleReading = (angle, mm);
             _active.Points.Clear();
-            _active.Points.Add(new InkPoint(ag.Center.X, ag.Center.Y, pr));
-            if (mm > 0) _active.Points.Add(new InkPoint(end.X, end.Y, pr));
+            _active.Points.Add(World(ag.Center, pr));
+            if (mm > 0) _active.Points.Add(World(end, pr));
             return;
         }
         if (_ruler is { } guide)
         {
             // Am Lineal: nur Anfangs- und Endpunkt, beide auf der Kante (knapp außen anliegend)
-            double offset = _active.Width / 2;
+            double offset = _active.Width * ViewOf(page).Zoom / 2; // halbe Strichbreite im Rahmen
             float maxPressure = Math.Max(pressure, _active.Points.Count > 0 ? _active.Points[0].Pressure : 0);
             var start = guide.At(_rulerStart, offset);
-            var end = guide.At(guide.Along(p), offset);
+            var end = guide.At(guide.Along(frame), offset);
+            _rulerEnd = guide.Along(frame);
             _active.Points.Clear();
-            _active.Points.Add(new InkPoint(start.X, start.Y, maxPressure));
-            if (end != start) _active.Points.Add(new InkPoint(end.X, end.Y, maxPressure));
+            _active.Points.Add(World(start, maxPressure));
+            if (end != start) _active.Points.Add(World(end, maxPressure));
             return;
         }
         // gleicher Ort wie zuvor (z. B. Druck-Update ohne Bewegung): nur Druck übernehmen
@@ -567,7 +592,7 @@ public sealed class PresenterView : Control
         page.Strokes.Add(stroke);
         MarkDirty();
         // inkrementell in die vorhandene Ink-Ebene zeichnen statt alles neu aufzubauen
-        if (_inkLayers.TryGetValue(page, out var layer))
+        if (!IsInfinite(page) && _inkLayers.TryGetValue(page, out var layer))
         {
             using var ctx = layer.CreateDrawingContext(false);
             stroke.Draw(ctx, Matrix.CreateScale(layer.PixelSize.Height, layer.PixelSize.Height));
@@ -579,8 +604,9 @@ public sealed class PresenterView : Control
     {
         _eraserPos = screen;
         if (CurrentPage is not { } page) return;
-        var p = ScreenToPage(screen);
-        int removed = page.Strokes.RemoveAll(s => s.HitTest(p, EraserRadius));
+        var p = ToWorld(page, ScreenToPage(screen));
+        double radius = EraserRadius / ViewOf(page).Zoom;
+        int removed = page.Strokes.RemoveAll(s => s.HitTest(p, radius));
         if (removed > 0)
         {
             MarkDirty();
@@ -636,7 +662,107 @@ public sealed class PresenterView : Control
 
     // ─────────────────────────────── Geodreieck ───────────────────────────────
 
-    private static double PageUnitsPerMm(Page page) => Paper.PtPerMm / page.SizePt.Height;
+    // ─────────────────────────── Unendliche Leinwand ───────────────────────────
+
+    private static bool IsInfinite(Page? page) => page is PaperPage { Paper.IsInfinite: true };
+
+    private static CanvasView ViewOf(Page? page) => page is PaperPage { Paper.IsInfinite: true } p ? p.View : CanvasView.Identity;
+
+    /// <summary>Rahmen-/Seiteneinheiten → Welt (bei festen Seiten identisch).</summary>
+    private static Point ToWorld(Page page, Point frame) => IsInfinite(page) ? ViewOf(page).ToWorld(frame) : frame;
+
+    private static Point ToFrame(Page page, Point world) => IsInfinite(page) ? ViewOf(page).ToFrame(world) : world;
+
+    /// <summary>Welt → Bildschirm (für Striche).</summary>
+    private Matrix WorldToScreen(Page page)
+    {
+        if (!IsInfinite(page)) return PageToScreen(page);
+        var v = ViewOf(page);
+        return Matrix.CreateTranslation(-v.Offset.X, -v.Offset.Y) * Matrix.CreateScale(v.Zoom, v.Zoom) * PageToScreen(page);
+    }
+
+    private void SetView(CanvasView view)
+    {
+        if (CurrentPage is not PaperPage { Paper.IsInfinite: true } page) return;
+        page.View = view;
+        StatusChanged?.Invoke();
+        InvalidateVisual();
+    }
+
+    /// <summary>Leinwand: Zoom 100 %, Ursprung links oben.</summary>
+    public void ResetCanvasView() => SetView(CanvasView.Identity);
+
+    /// <summary>Leinwand: gesamten Inhalt einpassen (oder zurücksetzen, wenn leer).</summary>
+    public void FitCanvasContent()
+    {
+        if (CurrentPage is not PaperPage { Paper.IsInfinite: true } page) return;
+        if (page.Strokes.Count == 0) { ResetCanvasView(); return; }
+        var bounds = page.Strokes.Select(s => s.Bounds).Aggregate((a, b) => a.Union(b));
+        SetView(CanvasView.Fit(bounds, page.SizePt.Width / page.SizePt.Height));
+    }
+
+    public bool CurrentIsInfinite => IsInfinite(CurrentPage);
+
+    /// <summary>
+    /// Leinwand mit Fingern (1 = verschieben, 2 = verschieben + zoomen) oder mittlerer Maustaste
+    /// verschieben. Nicht mit dem Stift, nicht wenn Finger zeichnen, nicht bei Handballen.
+    /// </summary>
+    private bool TryStartPan(PointerPressedEventArgs e, PointerPoint pt, double now)
+    {
+        if (!IsInfinite(CurrentPage)) return false;
+        bool ok = e.Pointer.Type switch
+        {
+            PointerType.Touch => !_touchDraws && now - _lastPenSeenMs > PalmRejectMs,
+            PointerType.Mouse => pt.Properties.IsMiddleButtonPressed,
+            _ => false,
+        };
+        if (!ok) return false;
+        if (_panPointers.Count >= 2) return true;
+        _panPointers[e.Pointer.Id] = pt.Position;
+        e.Pointer.Capture(this);
+        return true;
+    }
+
+    private void UpdatePan(long id, Point screen)
+    {
+        if (CurrentPage is not { } page) return;
+        var from = _panPointers[id];
+        double unitsPerDip = 1 / DestDip(page).Height;
+        var view = ViewOf(page);
+        if (_panPointers.Count == 1)
+        {
+            view = view.Pan((screen - from) * unitsPerDip);
+        }
+        else
+        {
+            var other = _panPointers.First(kv => kv.Key != id).Value;
+            var mid0 = new Point((from.X + other.X) / 2, (from.Y + other.Y) / 2);
+            var mid1 = new Point((screen.X + other.X) / 2, (screen.Y + other.Y) / 2);
+            double d0 = Distance(from, other), d1 = Distance(screen, other);
+            view = view.Pan((mid1 - mid0) * unitsPerDip);
+            if (d0 > 1) view = view.ZoomAt(ScreenToPage(mid1), d1 / d0);
+        }
+        _panPointers[id] = screen;
+        SetView(view);
+    }
+
+    /// <summary>Mausrad auf der Leinwand: scrollen (Umschalt = waagrecht), Strg = zoomen am Zeiger.</summary>
+    private bool CanvasWheel(PointerWheelEventArgs e)
+    {
+        if (CurrentPage is not { } page || !IsInfinite(page)) return false;
+        var view = ViewOf(page);
+        double dy = e.Delta.Y, dx = e.Delta.X;
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
+            view = view.ZoomAt(ScreenToPage(e.GetPosition(this)), Math.Pow(1.1, dy != 0 ? dy : dx));
+        else if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+            view = view.Pan(new Vector((dy != 0 ? dy : dx) * 0.08, 0));
+        else
+            view = view.Pan(new Vector(dx * 0.08, dy * 0.08));
+        SetView(view);
+        return true;
+    }
+
+    private static double PageUnitsPerMm(Page page) => Paper.PtPerMm / page.SizePt.Height * ViewOf(page).Zoom;
 
     /// <summary>lokale mm-Koordinaten des Geodreiecks → Bildschirm (DIP)</summary>
     private Matrix GeoToScreen(Page page) => GeoMath.LocalToPage(_geo, PageUnitsPerMm(page)) * PageToScreen(page);
@@ -700,7 +826,7 @@ public sealed class PresenterView : Control
 
     private bool TryStartGeoGesture(PointerPressedEventArgs e, PointerPoint pt, double now)
     {
-        if (!_geoVisible || CurrentPage is null) return false;
+        if (!_geoVisible || CurrentPage is null || _panPointers.Count > 0) return false;
         var type = e.Pointer.Type;
         // Handballen: Berührungen, solange der Stift in der Nähe ist, bewegen nichts
         if (type == PointerType.Touch && now - _lastPenSeenMs <= PalmRejectMs) return false;
@@ -800,7 +926,11 @@ public sealed class PresenterView : Control
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
         base.OnPointerWheelChanged(e);
-        if (!GeoHit(e.GetPosition(this))) return;
+        if (!GeoHit(e.GetPosition(this)))
+        {
+            if (CanvasWheel(e)) e.Handled = true;
+            return;
+        }
         double delta = e.Delta.Y != 0 ? e.Delta.Y : e.Delta.X;
         if (delta == 0) return;
         if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
@@ -863,10 +993,10 @@ public sealed class PresenterView : Control
             ? $"{angle:0}° ({180 - angle:0}°) · {(mm / 10).ToString("0.0", de)} cm"
             : $"{angle:0}° · {(mm / 10).ToString("0.0", de)} cm";
         var ft = MakeText(text, 18);
-        var end = _active!.Points[^1];
-        var dir = new Point(end.X, end.Y) - _geo.Center;
+        var end = ToFrame(page, new Point(_active!.Points[^1].X, _active.Points[^1].Y));
+        var dir = end - _geo.Center;
         double len = Math.Sqrt(dir.X * dir.X + dir.Y * dir.Y);
-        var anchor = (new Point(end.X, end.Y) + (len > 0 ? dir / len : default) * (30 / DestDip(page).Height)).Transform(PageToScreen(page));
+        var anchor = (end + (len > 0 ? dir / len : default) * (30 / DestDip(page).Height)).Transform(PageToScreen(page));
         var box = new Rect(anchor.X - ft.Width / 2 - 8, anchor.Y - ft.Height / 2 - 3, ft.Width + 16, ft.Height + 6);
         ctx.DrawRectangle(new SolidColorBrush(Color.FromArgb(0xD0, 0x16, 0x3A, 0x5C)), null, box, 6, 6);
         ctx.DrawText(ft, new Point(box.X + 8, box.Y + 3));
@@ -875,12 +1005,11 @@ public sealed class PresenterView : Control
     /// <summary>Länge der am Lineal gezogenen Strecke neben dem Endpunkt („4,3 cm“).</summary>
     private void DrawRulerLength(DrawingContext ctx, RulerGuide ruler, Page page)
     {
-        var last = _active!.Points[^1];
-        double end = ruler.Along(new Point(last.X, last.Y));
-        double cm = ruler.Millimetres(_rulerStart, end) / 10;
+        var last = ToFrame(page, new Point(_active!.Points[^1].X, _active.Points[^1].Y));
+        double cm = ruler.Millimetres(_rulerStart, _rulerEnd) / 10;
         var text = MakeText(cm.ToString("0.0", CultureInfo.GetCultureInfo("de-AT")) + " cm", 18);
         // etwas von der Kante weg auf die Stiftseite, damit der Stift das Etikett nicht verdeckt
-        var anchor = (new Point(last.X, last.Y) + ruler.Normal * (24 / DestDip(page).Height)).Transform(PageToScreen(page));
+        var anchor = (last + ruler.Normal * (24 / DestDip(page).Height)).Transform(PageToScreen(page));
         var box = new Rect(anchor.X - text.Width / 2 - 8, anchor.Y - text.Height / 2 - 3, text.Width + 16, text.Height + 6);
         ctx.DrawRectangle(new SolidColorBrush(Color.FromArgb(0xD0, 0x16, 0x3A, 0x5C)), null, box, 6, 6);
         ctx.DrawText(text, new Point(box.X + 8, box.Y + 3));
@@ -927,6 +1056,7 @@ public sealed class PresenterView : Control
         if (!_inFlight.Add((page, size))) return;
         try
         {
+            if (IsInfinite(page)) return; // Leinwand wird direkt gezeichnet
             Bitmap? bmp = page switch
             {
                 // Papier ist schnell gezeichnet → direkt auf dem UI-Thread
@@ -973,7 +1103,7 @@ public sealed class PresenterView : Control
     private RenderTargetBitmap? InkLayer(Page page)
     {
         var strokes = page.Strokes;
-        if (strokes.Count == 0) return null;
+        if (strokes.Count == 0 || IsInfinite(page)) return null;
         var size = DestPixels(page).Size;
         if (_inkLayers.TryGetValue(page, out var layer) && layer.PixelSize == size) return layer;
         layer?.Dispose();
@@ -1050,7 +1180,7 @@ public sealed class PresenterView : Control
 
         if (_active is not null)
         {
-            using (ctx.PushClip(DestDip(current))) _active.Draw(ctx, PageToScreen(current));
+            using (ctx.PushClip(DestDip(current))) _active.Draw(ctx, WorldToScreen(current));
         }
         if (_eraserPos is { } ep && (_erasing || _tool == Tool.Eraser))
         {
@@ -1067,6 +1197,19 @@ public sealed class PresenterView : Control
     private void DrawPage(DrawingContext ctx, Page page)
     {
         var dest = DestDip(page);
+        if (page is PaperPage { Paper.IsInfinite: true } canvas)
+        {
+            // Leinwand: Raster und Striche jeden Frame direkt (Ausschnitt ändert sich ständig);
+            // nur sichtbare Striche zeichnen
+            PaperRenderer.DrawCanvas(ctx, canvas.Paper, canvas.View, dest, Scaling);
+            var v = canvas.View;
+            var visible = new Rect(v.Offset.X, v.Offset.Y, dest.Width / dest.Height / v.Zoom, 1 / v.Zoom);
+            var m = WorldToScreen(page);
+            using (ctx.PushClip(dest))
+                foreach (var s in page.Strokes)
+                    if (s.Bounds.Intersects(visible)) s.Draw(ctx, m);
+            return;
+        }
         if (_pageBitmaps.TryGetValue(page, out var bmp))
             ctx.DrawImage(bmp, new Rect(bmp.Size), dest);
         else

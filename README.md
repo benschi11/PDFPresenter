@@ -47,7 +47,7 @@ Menü (nur Avalonia):
   Als PDF exportieren (Strg+E), Beenden
 - **Seite** → Leeres Blatt einfügen (Strg+Umschalt+N, auch „＋ Seite“ in der Stiftleiste),
   Seite löschen, Hintergrund (blanko / kariert / liniert / punktiert), Abstand (4–10 mm),
-  Format (16:9, A4 hoch, A4 quer)
+  Format (16:9, A4 hoch, A4 quer, unendliche Leinwand)
 - **Ansicht** → Stift-Panel, Kopfbereich, Messanzeige, Vollbild
 
 Papier und Tafel:
@@ -56,6 +56,20 @@ Papier und Tafel:
   letzten Seite automatisch ein neues Blatt an.
 - Abstände sind echte Millimeter der Seite (Karo 5 mm, Linien 8 mm), das Karo ist mittig
   ausgerichtet. Hintergrund/Format gelten für die aktuelle Papierseite und als Vorgabe für neue.
+
+Unendliche Leinwand (Seite → Format → Unendliche Leinwand, oder als Vorgabe für Neues Blatt):
+- Sichtbar ist ein 16:9-Ausschnitt (die „Kamera“ für die Aufnahme) über einer endlosen Fläche
+  mit Karo, Linien oder Punkten; das Raster läuft beim Verschieben mit und wird beim
+  Rauszoomen gröber.
+- **Finger:** einer verschiebt, zwei verschieben und zoomen (Pinch). **Maus:** mittlere Taste
+  ziehen, Rad scrollt (Umschalt = waagrecht), Strg+Rad zoomt am Zeiger. Zoom 10–800 %.
+  Der Stift zeichnet nur; Striche haben beim Zeichnen die gewählte Bildschirmstärke und
+  zoomen danach mit. Das Geodreieck zoomt mit (misst weiter in echten mm).
+- Seite → Leinwand: Ansicht zurücksetzen (Strg+0), alles zeigen (Strg+9).
+- Gespeichert werden Striche und der zuletzt gezeigte Ausschnitt (reines Verschieben/Zoomen
+  gilt nicht als Änderung). Export: eine Seite in Größe des Inhalts + 1 cm Rand, mit Raster.
+- Auf der Leinwand ersetzt das Verschieben das Wischen zum Blättern. Wenn Finger zeichnen
+  (Taste T), bewegen Finger die Leinwand nicht – dann Maus bzw. Tasten verwenden.
 
 Geodreieck (Taste G, Knopf „Geodreieck“ in der Stiftleiste, Ansicht → Geodreieck):
 - Originalmaße (16 cm Hypotenuse, Skala ±7 cm, Winkelmesser 0–180° mit Gegenskala) in echten

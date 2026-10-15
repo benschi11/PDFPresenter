@@ -56,6 +56,87 @@ public static class PaperRenderer
 
     private static double Offset(double length, double spacing) => (length % spacing) / 2;
 
+    /// <summary>Rasterabstand der unendlichen Leinwand in Welteinheiten.</summary>
+    public static double CanvasSpacing(Paper paper) => paper.SpacingMm * Paper.PtPerMm / Paper.FrameHeightPt;
+
+    /// <summary>
+    /// Raster der unendlichen Leinwand innerhalb von <paramref name="world"/> (Welteinheiten),
+    /// als Linien/Punkte in pt relativ zur linken oberen Ecke. Das Raster ist an der Welt
+    /// verankert (Linien bei Vielfachen des Abstands), damit es beim Verschieben mitläuft.
+    /// </summary>
+    public static (List<Line> Lines, List<Point> Dots) CanvasPattern(Paper paper, Rect world)
+    {
+        var lines = new List<Line>();
+        var dots = new List<Point>();
+        double s = CanvasSpacing(paper);
+        if (s <= 0 || paper.Style == PaperStyle.Blank) return (lines, dots);
+        const double k = Paper.FrameHeightPt;
+        double w = world.Width * k, h = world.Height * k;
+        IEnumerable<double> Steps(double from, double to)
+        {
+            for (double v = Math.Ceiling(from / s) * s; v <= to + 1e-9; v += s) yield return v;
+        }
+        switch (paper.Style)
+        {
+            case PaperStyle.Grid:
+                foreach (var x in Steps(world.Left, world.Right))
+                    lines.Add(new Line(new Point((x - world.Left) * k, 0), new Point((x - world.Left) * k, h)));
+                foreach (var y in Steps(world.Top, world.Bottom))
+                    lines.Add(new Line(new Point(0, (y - world.Top) * k), new Point(w, (y - world.Top) * k)));
+                break;
+            case PaperStyle.Lined:
+                foreach (var y in Steps(world.Top, world.Bottom))
+                    lines.Add(new Line(new Point(0, (y - world.Top) * k), new Point(w, (y - world.Top) * k)));
+                break;
+            case PaperStyle.Dotted:
+                foreach (var x in Steps(world.Left, world.Right))
+                    foreach (var y in Steps(world.Top, world.Bottom))
+                        dots.Add(new Point((x - world.Left) * k, (y - world.Top) * k));
+                break;
+        }
+        return (lines, dots);
+    }
+
+    /// <summary>
+    /// Zeichnet Hintergrund und Raster der unendlichen Leinwand direkt auf den Bildschirm.
+    /// Wird das Raster zu eng (&lt; 6 DIP), wird jede 5. Linie gezeigt usw.
+    /// </summary>
+    public static void DrawCanvas(DrawingContext ctx, Paper paper, CanvasView view, Rect dest, double renderScaling)
+    {
+        ctx.FillRectangle(Brushes.White, dest);
+        if (paper.Style == PaperStyle.Blank) return;
+        double unitToDip = dest.Height * view.Zoom; // Welteinheit → DIP
+        double s = CanvasSpacing(paper);
+        while (s * unitToDip < 6) s *= 5;
+        double px = 1 / renderScaling;
+        double Snap(double v) => Math.Round(v * renderScaling) / renderScaling + px / 2;
+
+        double aspect = dest.Width / dest.Height;
+        var world = new Rect(view.Offset.X, view.Offset.Y, aspect / view.Zoom, 1 / view.Zoom);
+        double ToX(double wx) => dest.X + (wx - world.X) * unitToDip;
+        double ToY(double wy) => dest.Y + (wy - world.Y) * unitToDip;
+        var color = paper.Style == PaperStyle.Lined ? LineColor : GridColor;
+        var pen = new Pen(new SolidColorBrush(color), px);
+
+        using (ctx.PushClip(dest))
+        {
+            if (paper.Style is PaperStyle.Grid)
+                for (double x = Math.Ceiling(world.Left / s) * s; x <= world.Right; x += s)
+                    ctx.DrawLine(pen, new Point(Snap(ToX(x)), dest.Top), new Point(Snap(ToX(x)), dest.Bottom));
+            if (paper.Style is PaperStyle.Grid or PaperStyle.Lined)
+                for (double y = Math.Ceiling(world.Top / s) * s; y <= world.Bottom; y += s)
+                    ctx.DrawLine(pen, new Point(dest.Left, Snap(ToY(y))), new Point(dest.Right, Snap(ToY(y))));
+            if (paper.Style is PaperStyle.Dotted)
+            {
+                var brush = new SolidColorBrush(DotColor);
+                double r = Math.Max(px, DotRadiusPt / Paper.FrameHeightPt * unitToDip);
+                for (double x = Math.Ceiling(world.Left / s) * s; x <= world.Right; x += s)
+                    for (double y = Math.Ceiling(world.Top / s) * s; y <= world.Bottom; y += s)
+                        ctx.DrawEllipse(brush, null, new Point(ToX(x), ToY(y)), r, r);
+            }
+        }
+    }
+
     /// <summary>Hintergrund exakt in <paramref name="size"/> Pixeln (wie eine gerenderte PDF-Seite).</summary>
     public static Bitmap Render(Paper paper, PixelSize size)
     {

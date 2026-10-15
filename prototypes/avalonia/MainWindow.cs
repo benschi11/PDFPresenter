@@ -234,7 +234,7 @@ public sealed class MainWindow : Window
         var spacings = new[] { 4.0, 5, 6, 8, 10 }
             .Select(mm => Radio($"{mm:0} mm", "spacing", p => p with { SpacingMm = mm }, p => Math.Abs(p.SpacingMm - mm) < 0.01))
             .ToArray();
-        var formats = new[] { (PageFormat.Wide16x9, "16:9 (Folie)"), (PageFormat.A4Portrait, "A4 hoch"), (PageFormat.A4Landscape, "A4 quer") }
+        var formats = new[] { (PageFormat.Wide16x9, "16:9 (Folie)"), (PageFormat.A4Portrait, "A4 hoch"), (PageFormat.A4Landscape, "A4 quer"), (PageFormat.Infinite, "Unendliche Leinwand") }
             .Select(t => Radio(t.Item2, "format", p => p with { Format = t.Item1 }, p => p.Format == t.Item1))
             .ToArray();
 
@@ -244,12 +244,20 @@ public sealed class MainWindow : Window
         menu.Items.Add(Sub("_Hintergrund", styles));
         menu.Items.Add(Sub("_Abstand", spacings));
         menu.Items.Add(Sub("_Format", formats));
+        var resetView = new MenuItem { Header = "Leinwand: Ansicht _zurücksetzen", InputGesture = KeyGesture.Parse("Ctrl+D0") };
+        resetView.Click += (_, _) => _view.ResetCanvasView();
+        var fitView = new MenuItem { Header = "Leinwand: _alles zeigen", InputGesture = KeyGesture.Parse("Ctrl+D9") };
+        fitView.Click += (_, _) => _view.FitCanvasContent();
+        menu.Items.Add(new Separator());
+        menu.Items.Add(resetView);
+        menu.Items.Add(fitView);
         // Häkchen beim Öffnen an die aktuelle Seite bzw. Vorgabe anpassen
         menu.SubmenuOpened += (_, _) =>
         {
             var paper = CurrentPaper();
             foreach (var (item, isChecked) in radios) item.IsChecked = isChecked(paper);
             delete.IsEnabled = _view.Deck is { Pages.Count: > 1 };
+            resetView.IsEnabled = fitView.IsEnabled = _view.CurrentIsInfinite;
         };
         return menu;
     }
@@ -485,6 +493,12 @@ public sealed class MainWindow : Window
                 break;
             case Key.N when ctrl:
                 await NewBlankAsync();
+                break;
+            case Key.D0 or Key.NumPad0 when ctrl:
+                _view.ResetCanvasView();
+                break;
+            case Key.D9 or Key.NumPad9 when ctrl:
+                _view.FitCanvasContent();
                 break;
             case Key.E when ctrl:
                 await ExportPdf();

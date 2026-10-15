@@ -2,7 +2,7 @@ using Avalonia;
 
 namespace PdfPresenter;
 
-public enum PageFormat { Wide16x9, A4Portrait, A4Landscape }
+public enum PageFormat { Wide16x9, A4Portrait, A4Landscape, Infinite }
 
 public enum PaperStyle { Blank, Grid, Lined, Dotted }
 
@@ -11,6 +11,12 @@ public sealed record Paper(PageFormat Format, PaperStyle Style, double SpacingMm
 {
     public const double PtPerMm = 72 / 25.4;
 
+    /// <summary>
+    /// Höhe des 16:9-Rahmens in pt. Bei der unendlichen Leinwand ist das die „Welteinheit“:
+    /// Weltkoordinate 1 = Rahmenhöhe bei Zoom 1.
+    /// </summary>
+    public const double FrameHeightPt = 473.56;
+
     public static Paper Default { get; } = new(PageFormat.Wide16x9, PaperStyle.Grid, 5);
 
     /// <summary>Seitengröße in pt. 16:9 wie Typst <c>presentation-16-9</c> (29,7 × 16,7 cm).</summary>
@@ -18,14 +24,17 @@ public sealed record Paper(PageFormat Format, PaperStyle Style, double SpacingMm
     {
         PageFormat.A4Portrait => new Size(595.28, 841.89),
         PageFormat.A4Landscape => new Size(841.89, 595.28),
-        _ => new Size(841.89, 473.56),
+        _ => new Size(841.89, FrameHeightPt), // 16:9 und Rahmen der unendlichen Leinwand
     };
 
     public static double DefaultSpacing(PaperStyle style) => style == PaperStyle.Lined ? 8 : 5;
 
     public string Describe() =>
         $"{Style switch { PaperStyle.Grid => "kariert", PaperStyle.Lined => "liniert", PaperStyle.Dotted => "punktiert", _ => "blanko" }}, " +
-        Format switch { PageFormat.A4Portrait => "A4 hoch", PageFormat.A4Landscape => "A4 quer", _ => "16:9" };
+        Format switch { PageFormat.A4Portrait => "A4 hoch", PageFormat.A4Landscape => "A4 quer", PageFormat.Infinite => "unendlich", _ => "16:9" };
+
+    public bool IsInfinite => Format == PageFormat.Infinite;
+
 }
 
 /// <summary>
@@ -50,6 +59,46 @@ public sealed class PaperPage(Paper paper) : Page
 {
     public Paper Paper { get; set; } = paper;
     public override Size SizePt => Paper.SizePt;
+
+    /// <summary>Sichtbarer Ausschnitt der unendlichen Leinwand (bei festen Formaten ohne Bedeutung).</summary>
+    public CanvasView View { get; set; } = CanvasView.Identity;
+}
+
+/// <summary>
+/// Ausschnitt der unendlichen Leinwand: Weltpunkt <see cref="Offset"/> liegt links oben im Rahmen,
+/// <see cref="Zoom"/> 1 = Welt- und Rahmeneinheiten gleich groß. Rahmen = (Welt − Offset) · Zoom.
+/// </summary>
+public readonly record struct CanvasView(Vector Offset, double Zoom)
+{
+    public const double MinZoom = 0.1, MaxZoom = 8;
+
+    public static CanvasView Identity { get; } = new(default, 1);
+
+    public Point ToWorld(Point frame) => new Point(frame.X / Zoom, frame.Y / Zoom) + Offset;
+
+    public Point ToFrame(Point world) => new((world.X - Offset.X) * Zoom, (world.Y - Offset.Y) * Zoom);
+
+    /// <summary>Inhalt um <paramref name="frameDelta"/> (Rahmeneinheiten) mitziehen.</summary>
+    public CanvasView Pan(Vector frameDelta) => this with { Offset = Offset - frameDelta / Zoom };
+
+    /// <summary>Zoomen, wobei der Weltpunkt unter <paramref name="frameAnchor"/> stehen bleibt.</summary>
+    public CanvasView ZoomAt(Point frameAnchor, double factor)
+    {
+        double zoom = Math.Clamp(Zoom * factor, MinZoom, MaxZoom);
+        var world = ToWorld(frameAnchor);
+        return new CanvasView(world - new Vector(frameAnchor.X / zoom, frameAnchor.Y / zoom), zoom);
+    }
+
+    /// <summary>Ausschnitt, der <paramref name="worldRect"/> mittig (mit Rand) in einen Rahmen mit Seitenverhältnis <paramref name="aspect"/> einpasst.</summary>
+    public static CanvasView Fit(Rect worldRect, double aspect, double margin = 0.06)
+    {
+        // Rand relativ zur Inhaltsgröße (bezogen auf den Rahmen), damit nichts am Rand klebt
+        double pad = Math.Max(worldRect.Width / aspect, worldRect.Height) * margin;
+        var r = worldRect.Inflate(pad);
+        double zoom = Math.Clamp(Math.Min(aspect / r.Width, 1 / r.Height), MinZoom, MaxZoom);
+        var center = r.Center;
+        return new CanvasView(center - new Vector(aspect / 2 / zoom, 0.5 / zoom), zoom);
+    }
 }
 
 /// <summary>

@@ -19,6 +19,31 @@ public sealed class Stroke(Color color, double width, bool highlighter)
     public bool Highlighter { get; } = highlighter;
     public List<InkPoint> Points { get; } = [];
 
+    /// <summary>Begrenzungsrechteck inkl. halber Strichbreite (für Sichtbarkeitsprüfung und Export).</summary>
+    public Rect Bounds
+    {
+        get
+        {
+            if (Points.Count == 0) return default;
+            double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
+            foreach (var p in Points)
+            {
+                minX = Math.Min(minX, p.X); minY = Math.Min(minY, p.Y);
+                maxX = Math.Max(maxX, p.X); maxY = Math.Max(maxY, p.Y);
+            }
+            double half = WidthAt(1) / 2;
+            return new Rect(minX - half, minY - half, maxX - minX + 2 * half, maxY - minY + 2 * half);
+        }
+    }
+
+    /// <summary>Kopie mit verschobenen und skalierten Punkten (z. B. Welt → Exportseite).</summary>
+    public Stroke Transformed(Vector offset, double scale)
+    {
+        var s = new Stroke(Color, Width * scale, Highlighter);
+        foreach (var p in Points) s.Points.Add(new InkPoint((p.X + offset.X) * scale, (p.Y + offset.Y) * scale, p.Pressure));
+        return s;
+    }
+
     /// <summary>Druck → Breite. Druck 0.5 (Maus) ergibt genau die Grundbreite.</summary>
     public double WidthAt(float pressure) => Highlighter ? Width : Width * (0.3 + 1.4 * pressure);
 
