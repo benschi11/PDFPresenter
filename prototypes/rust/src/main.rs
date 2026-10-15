@@ -3,6 +3,8 @@
 mod gpu;
 mod ink;
 mod pdf;
+mod picker;
+mod presets;
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -24,6 +26,7 @@ use winit::window::{Window, WindowAttributes, WindowId};
 use gpu::{Composite, Gpu, PageTexture, Quad};
 use ink::{InkPoint, Stroke, Tool, Vertex};
 use pdf::{PdfWorker, Reply};
+use picker::{Outcome, PenPicker};
 
 const PALM_REJECT: Duration = Duration::from_millis(1000);
 
@@ -105,7 +108,7 @@ struct App {
     fade_ms: u32,
 
     tool: Tool,
-    color_index: usize,
+    picker: PenPicker,
     active: Option<Active>,
     pointer_pos: Option<(f32, f32)>,
     barrel_held: bool,
@@ -136,8 +139,8 @@ impl App {
             from_page: None,
             fade_start: None,
             fade_pending: false,
-            tool: Tool::Pen,
-            color_index: 0,
+            tool: Tool::Draw,
+            picker: PenPicker::new(presets::load()),
             active: None,
             pointer_pos: None,
             barrel_held: false,
@@ -167,10 +170,12 @@ impl App {
             format!("{name} – Seite {}/{} – PDF-Presenter (Rust/wgpu)", self.page + 1, self.page_sizes.len())
         };
         if self.hud && !self.stats.report.is_empty() {
+            let pen = self.picker.current();
             let tool = match self.tool {
-                Tool::Pen => format!("Stift ({})", ink::PEN_COLOR_NAMES[self.color_index]),
-                Tool::Highlighter => "Textmarker".into(),
-                Tool::Eraser => "Radierer".into(),
+                Tool::Eraser => "Radierer".to_string(),
+                Tool::Draw => {
+                    format!("{} {} {} px", if pen.highlighter { "Textmarker" } else { "Stift" }, pen.color, pen.width)
+                }
             };
             let present = self.gpu.as_ref().map(|g| g.present_mode);
             title = format!(
@@ -356,7 +361,7 @@ impl App {
             return;
         }
         let erase = erase || self.tool == Tool::Eraser;
-        let stroke = (!erase).then(|| Stroke::new(self.tool, self.color_index));
+        let stroke = (!erase).then(|| Stroke::new(self.picker.current()));
         self.active = Some(Active { kind, stroke });
         self.extend(x, y, pressure);
     }
@@ -411,7 +416,33 @@ impl App {
         }
     }
 
+    fn window_height(&self) -> f32 {
+        self.gpu.as_ref().map_or(1.0, |g| g.size().1 as f32)
+    }
+
+    /// Stift-Panel offen: Zeiger gehen ans Panel, Klick daneben schließt es (ohne zu zeichnen).
+    fn picker_button(&mut self, state: ElementState, x: f32, y: f32) {
+        if state.is_pressed() {
+            if let Outcome::Consumed { changed: true } = self.picker.pointer_down(x, y, self.window_height()) {
+                self.tool = Tool::Draw;
+            }
+        } else {
+            self.picker.pointer_up();
+        }
+        self.update_title();
+        self.request_redraw();
+    }
+
     fn handle_pointer_button(&mut self, state: ElementState, x: f32, y: f32, button: ButtonSource) {
+        let primary = matches!(
+            button,
+            ButtonSource::Mouse(MouseButton::Left)
+                | ButtonSource::Touch { .. }
+                | ButtonSource::TabletTool { button: TabletToolButton::Contact, .. }
+        );
+        if self.picker.open && primary {
+            return self.picker_button(state, x, y);
+        }
         let (kind, erase, pressure) = match button {
             ButtonSource::Mouse(MouseButton::Left) => (PointerKind::Mouse, false, 0.5),
             ButtonSource::Mouse(MouseButton::Right) => (PointerKind::Mouse, true, 0.5),
@@ -445,6 +476,13 @@ impl App {
         let kind = PointerKind::from(source);
         self.note_pointer(kind, pressure);
         self.pointer_pos = Some((x, y));
+        if self.picker.open {
+            if self.picker.pointer_move(x, y, self.window_height()) {
+                self.tool = Tool::Draw;
+            }
+            self.request_redraw();
+            return;
+        }
         if self.active.as_ref().is_some_and(|a| a.kind == kind) {
             self.extend(x, y, pressure);
             self.request_redraw();
@@ -465,6 +503,8 @@ impl App {
             Key::Named(NamedKey::Home) => self.go_to(0),
             Key::Named(NamedKey::End) => self.go_to(usize::MAX),
             Key::Named(NamedKey::F11) => self.toggle_fullscreen(),
+            Key::Named(NamedKey::Tab) => self.picker.open = !self.picker.open,
+            Key::Named(NamedKey::Escape) if self.picker.open => self.picker.open = false,
             Key::Named(NamedKey::Escape) => {
                 if self.window().is_some_and(|w| w.fullscreen().is_some()) {
                     self.toggle_fullscreen();
@@ -475,12 +515,16 @@ impl App {
                 self.update_title();
             }
             Key::Character(c) => match c.as_str() {
-                "1" | "2" | "3" | "4" => {
-                    self.tool = Tool::Pen;
-                    self.color_index = c.parse::<usize>().unwrap() - 1;
+                "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" => {
+                    if self.picker.select_preset(c.parse::<usize>().unwrap() - 1) {
+                        self.tool = Tool::Draw;
+                    }
                 }
-                "h" => self.tool = Tool::Highlighter,
-                "e" => self.tool = Tool::Eraser,
+                "h" => {
+                    self.picker.select_first_highlighter();
+                    self.tool = Tool::Draw;
+                }
+                "e" => self.tool = if self.tool == Tool::Eraser { Tool::Draw } else { Tool::Eraser },
                 "c" => {
                     self.ink.remove(&self.page);
                     self.composites.remove(&self.page);
@@ -500,6 +544,7 @@ impl App {
             },
             _ => return,
         }
+        self.update_title();
         self.request_redraw();
     }
 
@@ -573,7 +618,7 @@ impl App {
     /// Radierer-Ring und Frame-Zeit-Diagramm in Fensterpixeln.
     fn overlay(&self) -> Vec<Vertex> {
         let mut out = Vec::new();
-        if let (Tool::Eraser, Some((x, y))) = (self.tool, self.pointer_pos) {
+        if let (Tool::Eraser, Some((x, y)), false) = (self.tool, self.pointer_pos, self.picker.open) {
             let (_, _, _, dh) = self.dest_rect(self.page);
             ink::ring(&mut out, x, y, ink::ERASER_RADIUS * dh as f32, 1.5, [0.5, 0.5, 0.5, 1.0]);
         }
@@ -595,6 +640,9 @@ impl App {
             ink::rect(&mut out, x0 + 258.0, y0, x0 + 272.0, y0 + h, [0.0, 0.0, 0.0, 0.7]);
             let ph = self.stats.pressure.clamp(0.0, 1.0) * (h - 4.0);
             ink::rect(&mut out, x0 + 261.0, y0 + h - 2.0 - ph, x0 + 269.0, y0 + h - 2.0, [0.3, 0.6, 1.0, 1.0]);
+        }
+        if self.picker.open {
+            self.picker.draw(&mut out, self.window_height());
         }
         out
     }

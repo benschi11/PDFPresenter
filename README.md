@@ -42,8 +42,9 @@ cargo run --release -- ../../samples/sample.pdf
 | Pos1 / Ende | erste / letzte Folie |
 | Stift / linke Maustaste | zeichnen (Druck → Strichbreite) |
 | Radierer-Ende, Stifttaste, rechte Maustaste | Striche löschen |
-| 1 – 4 | Stift schwarz / blau / rot / grün |
-| H / E | Textmarker / Radierer |
+| Tab | Stift-Panel: Farbe, Stärke, Stift/Textmarker, Presets (Esc oder Klick daneben schließt) |
+| 1 – 9 | Preset 1–9 wählen |
+| H / E | erster Textmarker-Preset / Radierer an/aus |
 | C · Strg+Z | Seite leeren · letzten Strich zurücknehmen |
 | + / − | Überblenddauer ±50 ms |
 | T | Finger-Zeichnen an/aus (Standard: aus = Handballenschutz) |

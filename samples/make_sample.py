@@ -34,7 +34,7 @@ def slide_title(c):
     lines = [
         "Leertaste / Pfeiltasten: blättern (Crossfade)",
         "Stift: zeichnen mit Druck, Radierer-Ende: löschen",
-        "1–4 Farben · H Textmarker · E Radierer · C Seite leeren",
+        "Tab Stift-Panel · 1–9 Presets · H Textmarker · E Radierer",
         "F11 Vollbild · F1 Messwerte · +/− Überblenddauer",
     ]
     for i, t in enumerate(lines):

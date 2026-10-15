@@ -16,17 +16,6 @@ namespace PdfPresenter;
 /// </summary>
 public sealed class PresenterView : Control
 {
-    private static readonly Color[] PenColors =
-    [
-        Color.FromRgb(0x10, 0x10, 0x10), // 1 schwarz
-        Color.FromRgb(0x1f, 0x5f, 0xd6), // 2 blau
-        Color.FromRgb(0xd6, 0x28, 0x28), // 3 rot
-        Color.FromRgb(0x1f, 0x9d, 0x4a), // 4 grün
-    ];
-    private static readonly string[] PenColorNames = ["schwarz", "blau", "rot", "grün"];
-    private static readonly Color HighlighterColor = Color.FromArgb(0x60, 0xff, 0xe0, 0x00);
-    private const double PenWidth = 0.0035;        // Anteil der Seitenhöhe (≈ 3,8 px bei 1080p)
-    private const double HighlighterWidth = 0.025;
     private const double EraserRadius = 0.012;
     private const int PalmRejectMs = 1000;         // Touch wird so lange nach Stiftkontakt ignoriert
 
@@ -52,8 +41,7 @@ public sealed class PresenterView : Control
     private int _fadeMs;
 
     // Eingabe
-    private Tool _tool = Tool.Pen;
-    private int _colorIndex;
+    private Tool _tool = Tool.Draw;
     private Stroke? _active;
     private int? _activePointerId;
     private PointerType _activePointerType;
@@ -75,6 +63,15 @@ public sealed class PresenterView : Control
     private PointerType _lastPointerType = PointerType.Mouse;
 
     public event Action? StatusChanged;
+
+    /// <summary>Aktuelle Stifteinstellung (aus dem Stiftauswahl-Panel).</summary>
+    public PenPreset Pen { get; set; } = PenStore.DefaultPresets[0];
+
+    public Tool Tool
+    {
+        get => _tool;
+        set { _tool = value; StatusChanged?.Invoke(); InvalidateVisual(); }
+    }
 
     public PresenterView(Options options)
     {
@@ -163,12 +160,7 @@ public sealed class PresenterView : Control
             case Key.Left or Key.Up or Key.PageUp or Key.Back or Key.P: Previous(); break;
             case Key.Home: GoTo(0); break;
             case Key.End: GoTo(int.MaxValue); break;
-            case Key.D1 or Key.D2 or Key.D3 or Key.D4:
-                _tool = Tool.Pen;
-                _colorIndex = e.Key - Key.D1;
-                break;
-            case Key.H: _tool = Tool.Highlighter; break;
-            case Key.E: _tool = Tool.Eraser; break;
+            case Key.E: _tool = _tool == Tool.Eraser ? Tool.Draw : Tool.Eraser; break;
             case Key.C: ClearPage(); break;
             case Key.Z when ctrl: Undo(); break;
             case Key.T: _touchDraws = !_touchDraws; break;
@@ -243,8 +235,7 @@ public sealed class PresenterView : Control
         }
         else
         {
-            bool hl = _tool == Tool.Highlighter;
-            _active = new Stroke(hl ? HighlighterColor : PenColors[_colorIndex], hl ? HighlighterWidth : PenWidth, hl);
+            _active = new Stroke(Pen.ToColor(), Pen.PageWidth, Pen.Highlighter);
             AddPoint(pt);
         }
         _pendingInputMs = double.IsNaN(_pendingInputMs) ? now : _pendingInputMs;
@@ -258,8 +249,8 @@ public sealed class PresenterView : Control
         double now = _clock.Elapsed.TotalMilliseconds;
         var current = e.GetCurrentPoint(this);
         NotePointer(e.Pointer.Type, current.Properties.Pressure, now);
-        if (e.Pointer.Type == PointerType.Pen && _tool != Tool.Eraser && !current.Properties.IsEraser)
-            _eraserPos = null;
+        if (_tool == Tool.Eraser || current.Properties.IsEraser) _eraserPos = current.Position;
+        else if (e.Pointer.Type == PointerType.Pen) _eraserPos = null;
 
         if (_activePointerId != e.Pointer.Id) return;
 
@@ -548,12 +539,9 @@ public sealed class PresenterView : Control
     private void DrawHud(DrawingContext ctx, double now)
     {
         var px = DestPixels(_page);
-        string tool = _tool switch
-        {
-            Tool.Pen => $"Stift ({PenColorNames[_colorIndex]})",
-            Tool.Highlighter => "Textmarker",
-            _ => "Radierer",
-        };
+        string tool = _tool == Tool.Eraser
+            ? "Radierer"
+            : string.Create(CultureInfo.InvariantCulture, $"{(Pen.Highlighter ? "Textmarker" : "Stift")} {Pen.Color} {Pen.Width:0} px");
         var inv = CultureInfo.InvariantCulture;
         string text = string.Join('\n',
             $"Seite {_page + 1}/{_doc!.PageCount} · {tool} · Überblendung {_fadeMs} ms · Touch zeichnet: {(_touchDraws ? "ja" : "nein")}",

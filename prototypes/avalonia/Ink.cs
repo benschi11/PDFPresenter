@@ -3,7 +3,7 @@ using Avalonia.Media;
 
 namespace PdfPresenter;
 
-public enum Tool { Pen, Highlighter, Eraser }
+public enum Tool { Draw, Eraser }
 
 /// <summary>
 /// Ein Stiftpunkt in Seiteneinheiten: y läuft von 0 (oben) bis 1 (unten), x von 0 bis

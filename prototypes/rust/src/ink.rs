@@ -3,6 +3,8 @@
 //! Seiteneinheiten: y läuft von 0 (oben) bis 1 (unten), x von 0 bis Seitenverhältnis.
 //! Dadurch sind Annotationen unabhängig von Fenstergröße und Auflösung.
 
+use crate::presets::PenPreset;
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
@@ -12,8 +14,7 @@ pub struct Vertex {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tool {
-    Pen,
-    Highlighter,
+    Draw,
     Eraser,
 }
 
@@ -24,16 +25,6 @@ pub struct InkPoint {
     pub pressure: f32,
 }
 
-pub const PEN_COLORS: [[f32; 4]; 4] = [
-    [0.063, 0.063, 0.063, 1.0], // 1 schwarz
-    [0.122, 0.373, 0.839, 1.0], // 2 blau
-    [0.839, 0.157, 0.157, 1.0], // 3 rot
-    [0.122, 0.616, 0.290, 1.0], // 4 grün
-];
-pub const PEN_COLOR_NAMES: [&str; 4] = ["schwarz", "blau", "rot", "grün"];
-pub const HIGHLIGHTER_COLOR: [f32; 4] = [1.0, 0.878, 0.0, 0.376];
-pub const PEN_WIDTH: f32 = 0.0035; // Anteil der Seitenhöhe (≈ 3,8 px bei 1080p)
-pub const HIGHLIGHTER_WIDTH: f32 = 0.025;
 pub const ERASER_RADIUS: f32 = 0.012;
 
 #[derive(Clone, Debug)]
@@ -45,14 +36,8 @@ pub struct Stroke {
 }
 
 impl Stroke {
-    pub fn new(tool: Tool, color_index: usize) -> Self {
-        let highlighter = tool == Tool::Highlighter;
-        Self {
-            color: if highlighter { HIGHLIGHTER_COLOR } else { PEN_COLORS[color_index] },
-            width: if highlighter { HIGHLIGHTER_WIDTH } else { PEN_WIDTH },
-            highlighter,
-            points: Vec::new(),
-        }
+    pub fn new(pen: &PenPreset) -> Self {
+        Self { color: pen.rgba(), width: pen.page_width(), highlighter: pen.highlighter, points: Vec::new() }
     }
 
     /// Druck → Breite. Druck 0.5 (Maus) ergibt genau die Grundbreite.

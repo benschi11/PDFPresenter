@@ -13,8 +13,16 @@ vergleichen** und entscheiden.
   noch nicht fertig (Sprung mit Ende), wartet der Crossfade, statt zu ruckeln.
 - **Crossfade** mit konfigurierbarer Dauer (`--fade <ms>`, +/−), smoothstep-Verlauf, im
   Gamma-Raum (wie Videoschnitt). Annotationen blenden mit.
-- **Stift** mit Druck → Breite, 4 Farben, **Textmarker** (halbtransparent, ohne Abdunkeln bei
+- **Stift** mit Druck → Breite, **Textmarker** (halbtransparent, ohne Abdunkeln bei
   Selbstüberlappung), **Radierer** (strichweise; auch Radierer-Ende und Stifttaste).
+- **Stift-Panel** (Tab): Stift/Textmarker, Palette mit 16 Farben, freie Farbe
+  (Sättigung/Helligkeit-Feld + Farbton-Leiste, in A zusätzlich Hex-Eingabe), Stärke 1–40 px
+  (bezogen auf 1080p) mit Vorschau in Originalgröße, **Presets** (max. 12, Tasten 1–9) speichern
+  und löschen. Ist das Panel offen, gehen Klicks ans Panel; ein Klick daneben schließt es, ohne
+  zu zeichnen.
+- **Presets** liegen in `pen-presets.json` (Windows `%APPDATA%\PDFPresenter\`, Linux
+  `~/.config/PDFPresenter/`). **Beide Prototypen nutzen dieselbe Datei**; die zuletzt gewählte
+  Einstellung wird mitgespeichert.
 - Annotationen **pro Seite** im Speicher, beim Zurückblättern wieder da. Koordinaten sind in
   Seiteneinheiten gespeichert, also unabhängig von Fenstergröße und Auflösung.
 - **Handballenschutz**: Finger zeichnen standardmäßig gar nicht (`T` bzw. `--touch` schaltet um).
@@ -36,6 +44,8 @@ Einstellungsdialog.
 | `Pdfium.cs` | ~15 P/Invoke-Funktionen auf PDFium, Worker-Thread, rendert BGRA direkt in eine Avalonia-`Bitmap` |
 | `PresenterView.cs` | eigenes `Control`: Layout, Crossfade (`PushOpacity`), Zeiger-Events, Messwerte |
 | `Ink.cs` | Strichmodell, Zeichnen (Segmente mit runden Kappen bzw. ein Pfad beim Textmarker), Hit-Test |
+| `PenPicker.cs` | Stift-Panel aus Avalonia-Steuerelementen (`ColorSpectrum`/`ColorSlider` aus `Avalonia.Controls.ColorPicker`) |
+| `PenSettings.cs` | Preset-Modell, Laden/Speichern der JSON-Datei |
 
 Ebenen: PDF-Bitmap → gecachte Ink-Ebene (`RenderTargetBitmap`, fertige Striche
 inkrementell) → aktiver Strich. Gerendert wird bei Bedarf. Während des Crossfades (oder mit
@@ -54,6 +64,8 @@ SkiaSharp-Versionskonflikte mit Avalonia zu vermeiden. Die Native-Binaries komme
 | `src/pdf.rs` | PDFium-Thread (`pdfium-render`), Aufträge per Kanal, Weckruf über `EventLoopProxy` |
 | `src/gpu.rs` | wgpu: Pipelines, Seitentexturen, Komposit-Texturen, Frame-Rendering |
 | `src/ink.rs` | Strichmodell, Tessellierung (Trapez pro Segment + Kreis pro Punkt), Hit-Test |
+| `src/picker.rs` | Stift-Panel, selbst gezeichnet aus Dreiecken (Farbfeld als Raster mit Eckfarben, Zahlen als Siebensegment-Ziffern) |
+| `src/presets.rs` | Preset-Modell, JSON (serde), HSV-Umrechnung, Tests |
 | `src/main.rs` | Fenster, Eingabe, Navigation, Messwerte |
 
 Pro sichtbarer Seite gibt es eine **Komposit-Textur** (PDF und fertige Striche, 4× MSAA).
