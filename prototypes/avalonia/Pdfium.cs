@@ -29,6 +29,30 @@ internal static partial class Native
     [LibraryImport(Lib)]
     public static partial void FPDF_RenderPageBitmap(nint bmp, nint page, int x, int y, int w, int h, int rotate, int flags);
 
+    // Export: Pfadobjekte einfügen und Dokument speichern
+    [LibraryImport(Lib)] public static partial nint FPDFPageObj_CreateNewPath(float x, float y);
+    [LibraryImport(Lib)] public static partial int FPDFPath_LineTo(nint path, float x, float y);
+    [LibraryImport(Lib)] public static partial int FPDFPath_SetDrawMode(nint path, int fillMode, int stroke);
+    [LibraryImport(Lib)] public static partial int FPDFPageObj_SetStrokeColor(nint obj, uint r, uint g, uint b, uint a);
+    [LibraryImport(Lib)] public static partial int FPDFPageObj_SetStrokeWidth(nint obj, float width);
+    [LibraryImport(Lib)] public static partial int FPDFPageObj_SetLineCap(nint obj, int cap);
+    [LibraryImport(Lib)] public static partial int FPDFPageObj_SetLineJoin(nint obj, int join);
+    [LibraryImport(Lib)] public static partial void FPDFPage_InsertObject(nint page, nint obj);
+    [LibraryImport(Lib)] public static partial int FPDFPage_GenerateContent(nint page);
+    [LibraryImport(Lib)] public static unsafe partial int FPDF_SaveAsCopy(nint doc, FileWrite* writer, uint flags);
+
+    /// <summary>FPDF_FILEWRITE: Version + Callback, der die Bytes blockweise liefert.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe struct FileWrite
+    {
+        public int Version;
+        public delegate* unmanaged[Cdecl]<FileWrite*, void*, CULong, int> WriteBlock;
+    }
+
+    public const int FPDF_LINECAP_ROUND = 1;
+    public const int FPDF_LINEJOIN_ROUND = 1;
+    public const uint FPDF_NO_INCREMENTAL = 2;
+
     public const int FPDFBitmap_BGRA = 4;
     public const int FPDF_ANNOT = 0x01;
 }
@@ -43,6 +67,9 @@ public sealed class PdfDocument : IDisposable
     private readonly Thread _worker;
     private GCHandle _data;
     private nint _doc;
+    private byte[] _bytes = [];
+
+    [ThreadStatic] private static Stream? _exportStream;
 
     public int PageCount { get; private set; }
     /// <summary>Seitengrößen in pt.</summary>
@@ -68,6 +95,7 @@ public sealed class PdfDocument : IDisposable
             {
                 Native.FPDF_InitLibrary();
                 var bytes = File.ReadAllBytes(path);
+                doc._bytes = bytes;
                 doc._data = GCHandle.Alloc(bytes, GCHandleType.Pinned);
                 doc._doc = Native.FPDF_LoadMemDocument(doc._data.AddrOfPinnedObject(), bytes.Length, 0);
                 if (doc._doc == 0)
@@ -122,6 +150,86 @@ public sealed class PdfDocument : IDisposable
                 return new Bitmap(PixelFormat.Bgra8888, AlphaFormat.Premul, (nint)p, size, new Vector(96, 96), stride);
             }
         }
+    }
+
+    /// <summary>
+    /// Schreibt eine Kopie des PDFs mit eingezeichneten Annotationen (Vektorpfade) nach
+    /// <paramref name="target"/>. Das geöffnete Dokument bleibt unverändert.
+    /// </summary>
+    public Task ExportAsync(string target, IReadOnlyDictionary<int, List<Stroke>> ink)
+    {
+        // Momentaufnahme der Striche, da der UI-Thread weiterzeichnen darf
+        var snapshot = ink.ToDictionary(kv => kv.Key, kv => kv.Value.ToList());
+        var tcs = new TaskCompletionSource();
+        _queue.Add(() =>
+        {
+            var handle = GCHandle.Alloc(_bytes.ToArray(), GCHandleType.Pinned);
+            nint doc = 0;
+            try
+            {
+                var bytes = (byte[])handle.Target!;
+                doc = Native.FPDF_LoadMemDocument(handle.AddrOfPinnedObject(), bytes.Length, 0);
+                if (doc == 0) throw new InvalidOperationException("PDF konnte für den Export nicht geladen werden.");
+                foreach (var (index, strokes) in snapshot)
+                {
+                    if (strokes.Count == 0 || index >= PageCount) continue;
+                    var page = Native.FPDF_LoadPage(doc, index);
+                    double h = Native.FPDF_GetPageHeightF(page);
+                    foreach (var stroke in strokes) AddStroke(page, stroke, h);
+                    Native.FPDFPage_GenerateContent(page);
+                    Native.FPDF_ClosePage(page);
+                }
+                using var file = File.Create(target);
+                Save(doc, file);
+                tcs.SetResult();
+            }
+            catch (Exception ex) { tcs.SetException(ex); }
+            finally
+            {
+                if (doc != 0) Native.FPDF_CloseDocument(doc);
+                handle.Free();
+            }
+        });
+        return tcs.Task;
+    }
+
+    private static void AddStroke(nint page, Stroke stroke, double pageHeight)
+    {
+        var c = stroke.Color;
+        foreach (var (points, width) in AnnotationFile.ToPdfPaths(stroke, pageHeight))
+        {
+            var path = Native.FPDFPageObj_CreateNewPath((float)points[0].X, (float)points[0].Y);
+            for (int i = 1; i < points.Count; i++) Native.FPDFPath_LineTo(path, (float)points[i].X, (float)points[i].Y);
+            Native.FPDFPath_SetDrawMode(path, 0, 1);
+            Native.FPDFPageObj_SetStrokeColor(path, c.R, c.G, c.B, c.A);
+            Native.FPDFPageObj_SetStrokeWidth(path, (float)width);
+            Native.FPDFPageObj_SetLineCap(path, Native.FPDF_LINECAP_ROUND);
+            Native.FPDFPageObj_SetLineJoin(path, Native.FPDF_LINEJOIN_ROUND);
+            Native.FPDFPage_InsertObject(page, path);
+        }
+    }
+
+    private static unsafe void Save(nint doc, Stream target)
+    {
+        _exportStream = target;
+        try
+        {
+            var writer = new Native.FileWrite { Version = 1, WriteBlock = &WriteBlock };
+            if (Native.FPDF_SaveAsCopy(doc, &writer, Native.FPDF_NO_INCREMENTAL) == 0)
+                throw new IOException("PDFium konnte das PDF nicht speichern.");
+        }
+        finally { _exportStream = null; }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
+    private static unsafe int WriteBlock(Native.FileWrite* self, void* data, CULong size)
+    {
+        try
+        {
+            _exportStream!.Write(new ReadOnlySpan<byte>(data, checked((int)size.Value)));
+            return 1;
+        }
+        catch { return 0; }
     }
 
     public void Dispose()

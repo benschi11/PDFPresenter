@@ -63,6 +63,8 @@ public sealed class PresenterView : Control
     private PointerType _lastPointerType = PointerType.Mouse;
 
     public event Action? StatusChanged;
+    /// <summary>Kurze Meldung für die Statusanzeige (z. B. Fehler beim Laden).</summary>
+    public event Action<string>? Notice;
 
     /// <summary>Aktuelle Stifteinstellung (aus dem Stiftauswahl-Panel).</summary>
     public PenPreset Pen { get; set; } = PenStore.DefaultPresets[0];
@@ -86,7 +88,28 @@ public sealed class PresenterView : Control
 
     public string Title => _doc is null
         ? "PDF-Presenter (Avalonia)"
-        : $"Seite {_page + 1}/{_doc.PageCount} – PDF-Presenter (Avalonia)";
+        : $"{(IsDirty ? "● " : "")}{System.IO.Path.GetFileName(CurrentPath)} – Seite {_page + 1}/{_doc.PageCount} – PDF-Presenter (Avalonia)";
+
+    /// <summary>Pfad des geöffneten PDFs.</summary>
+    public string? CurrentPath { get; private set; }
+    public PdfDocument? Document => _doc;
+    public IReadOnlyDictionary<int, List<Stroke>> Ink => _ink;
+
+    /// <summary>Annotationen seit dem letzten Speichern geändert.</summary>
+    public bool IsDirty { get; private set; }
+
+    public void MarkSaved()
+    {
+        IsDirty = false;
+        StatusChanged?.Invoke();
+    }
+
+    private void MarkDirty()
+    {
+        if (IsDirty) return;
+        IsDirty = true;
+        StatusChanged?.Invoke();
+    }
 
     public string PageStatus => _doc is null ? "" : $"Seite {_page + 1}/{_doc.PageCount}";
 
@@ -94,10 +117,23 @@ public sealed class PresenterView : Control
     {
         try
         {
+            var doc = await PdfDocument.OpenAsync(path);
             _doc?.Dispose();
-            _doc = await PdfDocument.OpenAsync(path);
+            _doc = doc;
+            CurrentPath = path;
+            IsDirty = false;
             _pageBitmaps.Clear();
             _ink.Clear();
+            // Gespeicherte Annotationen aus der Begleitdatei übernehmen
+            try
+            {
+                foreach (var (page, strokes) in AnnotationFile.Load(path))
+                    if (page >= 0 && page < doc.PageCount) _ink[page] = strokes;
+            }
+            catch (Exception ex)
+            {
+                Notice?.Invoke($"Annotationen nicht lesbar: {ex.Message}");
+            }
             ClearInkLayers();
             _page = 0;
             _fromPage = -1;
@@ -107,6 +143,7 @@ public sealed class PresenterView : Control
         catch (Exception ex)
         {
             _error = ex.Message;
+            Notice?.Invoke($"Öffnen fehlgeschlagen: {ex.Message}");
         }
         StatusChanged?.Invoke();
         InvalidateVisual();
@@ -166,7 +203,7 @@ public sealed class PresenterView : Control
             case Key.C: ClearPage(); break;
             case Key.Z when ctrl: Undo(); break;
             case Key.T: _touchDraws = !_touchDraws; break;
-            case Key.F1: _showHud = !_showHud; break;
+            case Key.F1: ToggleHud(); break;
             case Key.OemPlus or Key.Add: _fadeMs = Math.Min(_fadeMs + 50, 3000); break;
             case Key.OemMinus or Key.Subtract: _fadeMs = Math.Max(_fadeMs - 50, 0); break;
             default: return false;
@@ -174,6 +211,12 @@ public sealed class PresenterView : Control
         StatusChanged?.Invoke();
         InvalidateVisual();
         return true;
+    }
+
+    public void ToggleHud()
+    {
+        _showHud = !_showHud;
+        InvalidateVisual();
     }
 
     private List<Stroke> StrokesOf(int page)
@@ -184,6 +227,7 @@ public sealed class PresenterView : Control
 
     private void ClearPage()
     {
+        if (StrokesOf(_page).Count > 0) MarkDirty();
         StrokesOf(_page).Clear();
         InvalidateInkLayer(_page);
     }
@@ -193,6 +237,7 @@ public sealed class PresenterView : Control
         var list = StrokesOf(_page);
         if (list.Count == 0) return;
         list.RemoveAt(list.Count - 1);
+        MarkDirty();
         InvalidateInkLayer(_page);
     }
 
@@ -295,6 +340,12 @@ public sealed class PresenterView : Control
         if (_active is null || _doc is null) return;
         var p = ScreenToPage(pt.Position);
         float pressure = pt.Pointer.Type == PointerType.Mouse ? 0.5f : pt.Properties.Pressure;
+        // gleicher Ort wie zuvor (z. B. Druck-Update ohne Bewegung): nur Druck übernehmen
+        if (_active.Points.Count > 0 && _active.Points[^1] is var last && last.X == p.X && last.Y == p.Y)
+        {
+            _active.Points[^1] = last with { Pressure = Math.Max(last.Pressure, pressure) };
+            return;
+        }
         _active.Points.Add(new InkPoint(p.X, p.Y, pressure));
     }
 
@@ -306,6 +357,7 @@ public sealed class PresenterView : Control
         _erasing = false;
         if (stroke is null || stroke.Points.Count == 0) return;
         StrokesOf(_page).Add(stroke);
+        MarkDirty();
         // inkrementell in die vorhandene Ink-Ebene zeichnen statt alles neu aufzubauen
         if (_inkLayers.TryGetValue(_page, out var layer))
         {
@@ -320,7 +372,11 @@ public sealed class PresenterView : Control
         _eraserPos = screen;
         var p = ScreenToPage(screen);
         int removed = StrokesOf(_page).RemoveAll(s => s.HitTest(p, EraserRadius));
-        if (removed > 0) InvalidateInkLayer(_page);
+        if (removed > 0)
+        {
+            MarkDirty();
+            InvalidateInkLayer(_page);
+        }
     }
 
     // ───────────────────────────── Geometrie ───────────────────────────────

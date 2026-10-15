@@ -35,6 +35,17 @@ cargo run --release -- ../../samples/sample.pdf
 
 ## Bedienung (beide Prototypen)
 
+Menü (nur Avalonia): **Datei** → PDF öffnen (Strg+O), Annotationen speichern (Strg+S),
+Als PDF exportieren (Strg+E), Beenden · **Ansicht** → Stift-Panel, Kopfbereich, Messanzeige, Vollbild.
+
+- **Speichern** schreibt die Annotationen in eine Begleitdatei `<datei>.pdf.annot.json` neben
+  dem PDF. Das Original bleibt unverändert, und beim nächsten Öffnen sind die Striche wieder da.
+  Ungespeicherte Änderungen zeigt ein ● im Fenstertitel; vor dem Schließen oder Öffnen eines
+  anderen PDFs fragt die App nach.
+- **Exportieren** erzeugt ein neues PDF, in dem die Striche als Vektorgrafik eingezeichnet sind.
+  Ohne Oberfläche geht das auch per Kommandozeile:
+  `PdfPresenter.Avalonia folien.pdf --export folien-annotiert.pdf`.
+
 | Taste / Eingabe | Funktion |
 |---|---|
 | Leertaste, →, ↓, Bild ↓, N | nächste Folie (Crossfade) |
@@ -58,9 +69,9 @@ cargo run --release -- ../../samples/sample.pdf
 
 Die kompakte Stiftleiste liegt **oberhalb** der Folienfläche, nicht darüber. Für eine
 pixelgenaue 1080p-Aufnahme den Prototyp mit `--canvas 1920x1080` starten: Das Fenster wird dann
-so groß, dass die Folienfläche exakt 1920×1080 Pixel hat, zuzüglich 44 px Leiste (mal
-Windows-Skalierung). In OBS die Fensteraufnahme oben um die Leistenhöhe zuschneiden
-(Filter *Zuschneiden/Polster*, oben 44 px bei 100 % Skalierung). Den genauen Wert zeigt die
+so groß, dass die Folienfläche exakt 1920×1080 Pixel hat, zuzüglich Kopfbereich (Rust: 44 px Leiste,
+Avalonia: Menü + Leiste, 76 px; jeweils mal Windows-Skalierung). In OBS die Fensteraufnahme oben
+um die Höhe des Kopfbereichs zuschneiden (Filter *Zuschneiden/Polster*). Den genauen Wert zeigt die
 Messanzeige (F1) bei Avalonia als „Folienfläche … ab y = … px“. Auf einem 1080p-Monitor im
 Vollbild die Leiste mit F2 ausblenden; dann bleiben nur Tastenkürzel (1–9, H, E).
 
