@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>PdfPresenter</RootNamespace>
+    <AssemblyName>PdfPresenter.Avalonia</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.4" />
+    <!-- Native PDFium-Binaries (pdfium.dll / libpdfium.so); die Bindings schreiben wir selbst (Pdfium.cs). -->
+    <PackageReference Include="bblanchon.PDFium.Win32" Version="157.0.8100" />
+    <PackageReference Include="bblanchon.PDFium.Linux" Version="157.0.8100" />
+  </ItemGroup>
+
+</Project>

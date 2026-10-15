@@ -1,0 +1,11 @@
+# .NET
+bin/
+obj/
+*.user
+.vs/
+
+# Rust
+target/
+
+# PDFium-Bibliothek für den Rust-Prototyp (wird per Skript geladen)
+prototypes/rust/pdfium/
