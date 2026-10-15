@@ -4,7 +4,14 @@ Native Desktop-App zum Abspielen von PDF-Präsentationen mit Folienübergängen 
 Freihand-Annotationen – gedacht für die Aufnahme von Lehrvideos (MatheVideos, Aufnahme extern mit OBS).
 Anforderungen: [docs/WEITERGABE.md](docs/WEITERGABE.md).
 
-## Stand: zwei Prototypen zum Vergleich
+## Entscheidung
+
+Weiterentwickelt wird **Avalonia** ([`prototypes/avalonia`](prototypes/avalonia)). Der
+Rust-Prototyp bleibt als Referenz im Repository, bekommt aber keine neuen Funktionen mehr
+(z. B. fehlen dort Menüleiste, Speichern und PDF-Export). Eine iPad-Version ist angedacht,
+aber zurückgestellt.
+
+## Die zwei Prototypen
 
 | | Prototyp A | Prototyp B |
 |---|---|---|
