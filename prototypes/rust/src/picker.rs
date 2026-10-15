@@ -520,3 +520,119 @@ fn number(out: &mut Vec<Vertex>, x: f32, y: f32, h: f32, n: u32, c: [f32; 4]) {
         }
     }
 }
+
+// ───────────────────────────── Kompaktleiste ─────────────────────────────
+
+/// Klickziel in der kompakten Stiftleiste.
+pub enum BarHit {
+    Preset(usize),
+    Eraser,
+    Settings,
+}
+
+struct BarLayout {
+    presets: Vec<Rect>,
+    eraser: Rect,
+    settings: Rect,
+}
+
+/// Höhe der Leiste in logischen Pixeln (wie im Avalonia-Prototyp).
+pub const BAR_HEIGHT: f32 = 44.0;
+
+impl PenPicker {
+    fn bar_layout(&self, bar_h: f32) -> BarLayout {
+        let k = bar_h / BAR_HEIGHT;
+        let size = 36.0 * k;
+        let y = 4.0 * k;
+        let presets: Vec<Rect> = (0..self.settings.presets.len())
+            .map(|i| Rect { x: 6.0 * k + i as f32 * 40.0 * k, y, w: size, h: size })
+            .collect();
+        let x = presets.last().map_or(6.0 * k, |r| r.x + r.w) + 20.0 * k;
+        BarLayout {
+            presets,
+            eraser: Rect { x, y, w: 56.0 * k, h: size },
+            settings: Rect { x: x + 64.0 * k, y, w: 48.0 * k, h: size },
+        }
+    }
+
+    pub fn bar_hit(&self, x: f32, y: f32, bar_h: f32) -> Option<BarHit> {
+        let l = self.bar_layout(bar_h);
+        if let Some(i) = l.presets.iter().position(|r| r.contains(x, y)) {
+            Some(BarHit::Preset(i))
+        } else if l.eraser.contains(x, y) {
+            Some(BarHit::Eraser)
+        } else if l.settings.contains(x, y) {
+            Some(BarHit::Settings)
+        } else {
+            None
+        }
+    }
+
+    /// Kompakte Leiste oberhalb der Folienfläche: nur Presets, Radierer, Zahnrad (öffnet das
+    /// große Panel) und rechts die Seitenzahl.
+    pub fn draw_bar(&self, out: &mut Vec<Vertex>, width: f32, bar_h: f32, eraser: bool, page: Option<(usize, usize)>) {
+        let k = bar_h / BAR_HEIGHT;
+        let l = self.bar_layout(bar_h);
+        ink::rect(out, 0.0, 0.0, width, bar_h, [0.106, 0.114, 0.129, 1.0]);
+        ink::rect(out, 0.0, bar_h - k.max(1.0), width, bar_h, [0.2, 0.21, 0.235, 1.0]);
+
+        let selected = if eraser { None } else { self.selected() };
+        for (i, b) in l.presets.iter().enumerate() {
+            let p = &self.settings.presets[i];
+            if Some(i) == selected {
+                outline(out, b, 3.0 * k, ACCENT);
+            }
+            ink::rect(out, b.x, b.y, b.x + b.w, b.y + b.h, WHITE);
+            let (cx, cy) = (b.x + b.w / 2.0, b.y + b.h / 2.0 + 2.0 * k);
+            let d = p.width.clamp(3.0, 26.0) * k;
+            if p.highlighter {
+                ink::rect(out, cx - 12.0 * k, cy - d / 2.0, cx + 12.0 * k, cy + d / 2.0, opaque_on_white(p));
+            } else {
+                ink::circle(out, cx, cy, d / 2.0, opaque_on_white(p));
+            }
+            if i < 9 {
+                number(out, b.x + 2.0 * k, b.y + 2.0 * k, 8.0 * k, i as u32 + 1, MUTED);
+            }
+        }
+        if let Some(first) = l.presets.first() {
+            let x = l.eraser.x - 10.0 * k;
+            ink::rect(out, x, first.y + 4.0 * k, x + k.max(1.0), first.y + first.h - 4.0 * k, [0.5, 0.5, 0.5, 0.5]);
+        }
+
+        // Radierer: schräger Block, zweifarbig
+        let e = &l.eraser;
+        ink::rect(out, e.x, e.y, e.x + e.w, e.y + e.h, if eraser { ACCENT } else { BUTTON_BG });
+        let (cx, cy) = (e.x + e.w / 2.0, e.y + e.h / 2.0);
+        line(out, cx - 12.0 * k, cy + 7.0 * k, cx - 2.0 * k, cy - 3.0 * k, 12.0 * k, [0.95, 0.55, 0.65, 1.0]);
+        line(out, cx - 2.0 * k, cy - 3.0 * k, cx + 8.0 * k, cy - 13.0 * k, 12.0 * k, WHITE);
+        ink::rect(out, cx - 14.0 * k, cy + 11.0 * k, cx + 14.0 * k, cy + 12.5 * k, WHITE);
+
+        // Zahnrad: Ring mit Zähnen; hervorgehoben, solange das große Panel offen ist
+        let s = &l.settings;
+        ink::rect(out, s.x, s.y, s.x + s.w, s.y + s.h, if self.open { ACCENT } else { BUTTON_BG });
+        let (gx, gy) = (s.x + s.w / 2.0, s.y + s.h / 2.0);
+        ink::ring(out, gx, gy, 8.0 * k, 3.5 * k, WHITE);
+        for t in 0..8 {
+            let a = t as f32 / 8.0 * std::f32::consts::TAU;
+            let (dx, dy) = (a.cos(), a.sin());
+            line(out, gx + dx * 7.0 * k, gy + dy * 7.0 * k, gx + dx * 11.0 * k, gy + dy * 11.0 * k, 3.5 * k, WHITE);
+        }
+
+        // Seitenzahl rechts: "3/6"
+        if let Some((cur, total)) = page {
+            let h = 16.0 * k;
+            let digit_w = h * 0.55 + (h * 0.13).max(1.5) * 1.8;
+            let text_w = (digits(cur) + digits(total)) as f32 * digit_w + 10.0 * k;
+            let x = width - 12.0 * k - text_w;
+            let y = (bar_h - h) / 2.0;
+            number(out, x, y, h, cur as u32, MUTED);
+            let sx = x + digits(cur) as f32 * digit_w;
+            line(out, sx + 1.0 * k, y + h, sx + 7.0 * k, y, 2.0 * k, MUTED);
+            number(out, sx + 10.0 * k, y, h, total as u32, MUTED);
+        }
+    }
+}
+
+fn digits(n: usize) -> usize {
+    n.to_string().len()
+}

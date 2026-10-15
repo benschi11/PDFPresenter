@@ -88,6 +88,8 @@ public sealed class PresenterView : Control
         ? "PDF-Presenter (Avalonia)"
         : $"Seite {_page + 1}/{_doc.PageCount} – PDF-Presenter (Avalonia)";
 
+    public string PageStatus => _doc is null ? "" : $"Seite {_page + 1}/{_doc.PageCount}";
+
     public async Task OpenAsync(string path)
     {
         try
@@ -550,7 +552,9 @@ public sealed class PresenterView : Control
                 _continuous ? "(kontinuierlich)" : "(nur während Überblendung gemessen)"),
             string.Format(inv, "Zeiger: {0} · Druck {1:F2} · {2:F0} Punkte/s · Eingabe→Render Ø {3:F1} ms · max {4:F1} ms",
                 _lastPointerType, _lastPressure, _penEvents.Sum(now), _inputLatency.Average(now), _inputLatency.Max(now)),
-            string.Format(inv, "Seite in Pixeln: {0}×{1} · Skalierung {2:F2} · F1 blendet aus", px.Width, px.Height, Scaling));
+            string.Format(inv, "Seite in Pixeln: {0}×{1} · Folienfläche {2}×{3} ab y = {4} px im Fenster (OBS-Zuschnitt) · Skalierung {5:F2} · F1 blendet aus",
+                px.Width, px.Height, (int)Math.Round(Bounds.Width * Scaling), (int)Math.Round(Bounds.Height * Scaling),
+                (int)Math.Round((this.TranslatePoint(default, TopLevel.GetTopLevel(this)!)?.Y ?? 0) * Scaling), Scaling));
         var ft = MakeText(text, 13);
         var origin = new Point(12, 12);
         ctx.FillRectangle(new SolidColorBrush(Color.FromArgb(0xb0, 0, 0, 0)), new Rect(origin, new Size(ft.Width + 16, ft.Height + 12)));

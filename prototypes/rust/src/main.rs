@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use winit::application::ApplicationHandler;
 use winit::cursor::CursorIcon;
-use winit::dpi::LogicalSize;
+use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::{
     ButtonSource, ElementState, MouseButton, PointerKind, PointerSource, TabletToolButton, TabletToolData,
     TabletToolKind, WindowEvent,
@@ -26,7 +26,7 @@ use winit::window::{Window, WindowAttributes, WindowId};
 use gpu::{Composite, Gpu, PageTexture, Quad};
 use ink::{InkPoint, Stroke, Tool, Vertex};
 use pdf::{PdfWorker, Reply};
-use picker::{Outcome, PenPicker};
+use picker::{BarHit, Outcome, PenPicker};
 
 const PALM_REJECT: Duration = Duration::from_millis(1000);
 
@@ -37,12 +37,20 @@ struct Args {
     low_latency: bool,
     touch: bool,
     on_demand: bool,
+    canvas: Option<(u32, u32)>,
 }
 
 impl Args {
     fn parse() -> Self {
-        let mut a =
-            Args { pdf: None, fade_ms: 400, fullscreen: false, low_latency: false, touch: false, on_demand: false };
+        let mut a = Args {
+            pdf: None,
+            fade_ms: 400,
+            fullscreen: false,
+            low_latency: false,
+            touch: false,
+            on_demand: false,
+            canvas: None,
+        };
         let mut it = std::env::args().skip(1);
         while let Some(arg) = it.next() {
             match arg.as_str() {
@@ -51,6 +59,12 @@ impl Args {
                 "--low-latency" => a.low_latency = true,
                 "--touch" => a.touch = true,
                 "--on-demand" => a.on_demand = true,
+                "--canvas" => {
+                    a.canvas = it.next().and_then(|v| {
+                        let (w, h) = v.split_once(['x', 'X'])?;
+                        Some((w.parse().ok()?, h.parse().ok()?))
+                    })
+                }
                 "-h" | "--help" => {
                     println!(
                         "pdfpresenter-rust <datei.pdf> [Optionen]\n  \
@@ -58,7 +72,9 @@ impl Args {
                          --fullscreen    im Vollbild starten (F11 schaltet um)\n  \
                          --low-latency   Mailbox/Immediate statt VSync-Fifo, Frame-Latenz 1\n  \
                          --touch         Finger dürfen zeichnen (Standard: nur Stift/Maus)\n  \
-                         --on-demand     nur bei Bedarf rendern statt mit konstanter Bildrate"
+                         --on-demand     nur bei Bedarf rendern statt mit konstanter Bildrate\n  \
+                         --canvas WxH    Fenster so groß, dass die Folienfläche exakt WxH Pixel hat\n                  \
+                         (zuzüglich Stiftleiste oben), z. B. --canvas 1920x1080"
                     );
                     std::process::exit(0);
                 }
@@ -117,6 +133,7 @@ struct App {
     modifiers: ModifiersState,
 
     hud: bool,
+    bar_visible: bool,
     stats: Stats,
 }
 
@@ -147,6 +164,7 @@ impl App {
             last_pen_seen: None,
             modifiers: ModifiersState::empty(),
             hud: true,
+            bar_visible: true,
             stats: Stats::default(),
         }
     }
@@ -193,17 +211,41 @@ impl App {
     /// Zielrechteck einer Seite in physischen Pixeln (x, y, w, h). Passt das Seitenverhältnis
     /// (±1 %), wird die Fläche komplett gefüllt – randlos. Sonst eingepasst und zentriert.
     fn dest_rect(&self, page: usize) -> (u32, u32, u32, u32) {
-        let (vw, vh) = self.gpu.as_ref().map(|g| g.size()).unwrap_or((1, 1));
-        let Some(&(pw, ph)) = self.page_sizes.get(page) else { return (0, 0, vw, vh) };
+        let (_, top, vw, vh) = self.canvas_rect();
+        let Some(&(pw, ph)) = self.page_sizes.get(page) else { return (0, top, vw, vh) };
         let (page_aspect, view_aspect) = (pw / ph, vw as f32 / vh as f32);
         if ((page_aspect - view_aspect) / page_aspect).abs() < 0.01 {
-            (0, 0, vw, vh)
+            (0, top, vw, vh)
         } else if page_aspect > view_aspect {
             let h = (vw as f32 / page_aspect).round() as u32;
-            (0, (vh - h) / 2, vw, h)
+            (0, top + (vh - h) / 2, vw, h)
         } else {
             let w = (vh as f32 * page_aspect).round() as u32;
-            ((vw - w) / 2, 0, w, vh)
+            ((vw - w) / 2, top, w, vh)
+        }
+    }
+
+    /// Höhe der kompakten Stiftleiste in physischen Pixeln (0, wenn ausgeblendet).
+    fn bar_height(&self) -> u32 {
+        match (self.bar_visible, self.window()) {
+            (true, Some(w)) => (picker::BAR_HEIGHT as f64 * w.scale_factor()).round() as u32,
+            _ => 0,
+        }
+    }
+
+    /// Folienfläche (x, y, w, h) im Fenster: alles unterhalb der Stiftleiste.
+    fn canvas_rect(&self) -> (u32, u32, u32, u32) {
+        let (vw, vh) = self.gpu.as_ref().map(|g| g.size()).unwrap_or((1, 1));
+        let bar = self.bar_height().min(vh.saturating_sub(1));
+        (0, bar, vw, vh - bar)
+    }
+
+    /// Fenster so groß machen, dass die Folienfläche exakt `canvas` Pixel hat.
+    fn size_for_canvas(&self) {
+        if let (Some((w, h)), Some(win)) = (self.args.canvas, self.window())
+            && win.fullscreen().is_none()
+        {
+            let _ = win.request_surface_size(PhysicalSize::new(w, h + self.bar_height()).into());
         }
     }
 
@@ -443,6 +485,20 @@ impl App {
         if self.picker.open && primary {
             return self.picker_button(state, x, y);
         }
+        if primary && state.is_pressed() && y < self.bar_height() as f32 {
+            match self.picker.bar_hit(x, y, self.bar_height() as f32) {
+                Some(BarHit::Preset(i)) => {
+                    self.picker.select_preset(i);
+                    self.tool = Tool::Draw;
+                }
+                Some(BarHit::Eraser) => self.tool = if self.tool == Tool::Eraser { Tool::Draw } else { Tool::Eraser },
+                Some(BarHit::Settings) => self.picker.open = true,
+                None => {}
+            }
+            self.update_title();
+            self.request_redraw();
+            return;
+        }
         let (kind, erase, pressure) = match button {
             ButtonSource::Mouse(MouseButton::Left) => (PointerKind::Mouse, false, 0.5),
             ButtonSource::Mouse(MouseButton::Right) => (PointerKind::Mouse, true, 0.5),
@@ -504,6 +560,11 @@ impl App {
             Key::Named(NamedKey::End) => self.go_to(usize::MAX),
             Key::Named(NamedKey::F11) => self.toggle_fullscreen(),
             Key::Named(NamedKey::Tab) => self.picker.open = !self.picker.open,
+            Key::Named(NamedKey::F2) => {
+                self.bar_visible = !self.bar_visible;
+                self.size_for_canvas();
+                self.request_pages();
+            }
             Key::Named(NamedKey::Escape) if self.picker.open => self.picker.open = false,
             Key::Named(NamedKey::Escape) => {
                 if self.window().is_some_and(|w| w.fullscreen().is_some()) {
@@ -599,8 +660,12 @@ impl App {
         }
         let overlay = self.overlay();
         let transform = self.ink_transform(page);
+        let canvas = {
+            let (x, y, w, h) = self.canvas_rect();
+            [x, y, w, h]
+        };
         let gpu = self.gpu.as_mut().unwrap();
-        let presented = gpu.render(&quads, Some((&live, highlighter, transform)), &overlay);
+        let presented = gpu.render(&quads, Some((&live, highlighter, transform)), canvas, &overlay);
 
         if presented {
             self.stats.frames += 1;
@@ -624,7 +689,7 @@ impl App {
         }
         if self.hud {
             // 240 Balken = letzte 240 Frames; Linien bei 16,7 ms (grün) und 33,3 ms (rot); 3 px pro ms
-            let (x0, y0, h) = (12.0, 12.0, 110.0);
+            let (x0, y0, h) = (12.0, self.bar_height() as f32 + 12.0, 110.0);
             ink::rect(&mut out, x0, y0, x0 + 252.0, y0 + h, [0.0, 0.0, 0.0, 0.7]);
             for (i, &ms) in self.stats.frame_times.iter().enumerate() {
                 let bh = (ms * 3.0).min(h - 4.0);
@@ -640,6 +705,11 @@ impl App {
             ink::rect(&mut out, x0 + 258.0, y0, x0 + 272.0, y0 + h, [0.0, 0.0, 0.0, 0.7]);
             let ph = self.stats.pressure.clamp(0.0, 1.0) * (h - 4.0);
             ink::rect(&mut out, x0 + 261.0, y0 + h - 2.0 - ph, x0 + 269.0, y0 + h - 2.0, [0.3, 0.6, 1.0, 1.0]);
+        }
+        if self.bar_visible {
+            let width = self.gpu.as_ref().map_or(1.0, |g| g.size().0 as f32);
+            let page = (!self.page_sizes.is_empty()).then(|| (self.page + 1, self.page_sizes.len()));
+            self.picker.draw_bar(&mut out, width, self.bar_height() as f32, self.tool == Tool::Eraser, page);
         }
         if self.picker.open {
             self.picker.draw(&mut out, self.window_height());
@@ -697,7 +767,10 @@ impl ApplicationHandler for App {
             Arc::from(event_loop.create_window(attrs).expect("Fenster konnte nicht erstellt werden"));
         window.set_cursor(CursorIcon::Crosshair.into());
         match Gpu::new(&self.instance, window, self.args.low_latency) {
-            Ok(gpu) => self.gpu = Some(gpu),
+            Ok(gpu) => {
+                self.gpu = Some(gpu);
+                self.size_for_canvas();
+            }
             Err(e) => {
                 eprintln!("GPU-Initialisierung fehlgeschlagen: {e}");
                 event_loop.exit();

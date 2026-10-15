@@ -524,6 +524,8 @@ impl Gpu {
         &mut self,
         quads: &[Quad],
         live: Option<(&[Vertex], bool, InkTransform)>,
+        // Folienfläche (x, y, w, h) in Pixeln: der aktive Strich wird darauf beschnitten
+        canvas: [u32; 4],
         overlay: &[Vertex],
     ) -> bool {
         let frame = match self.surface.get_current_texture() {
@@ -602,6 +604,7 @@ impl Gpu {
             if let Some((vertices, highlighter, _)) = live
                 && !vertices.is_empty()
             {
+                pass.set_scissor_rect(canvas[0], canvas[1], canvas[2].max(1), canvas[3].max(1));
                 pass.set_pipeline(if highlighter { &self.highlighter_pipeline } else { &self.ink_pipeline });
                 pass.set_stencil_reference(1);
                 pass.set_bind_group(0, &self.uniform_bind_group, &[slot(live_slot)]);
@@ -609,6 +612,7 @@ impl Gpu {
                 pass.draw(0..vertices.len() as u32, 0..1);
             }
             if !overlay.is_empty() {
+                pass.set_scissor_rect(0, 0, self.config.width, self.config.height);
                 pass.set_pipeline(&self.ink_pipeline);
                 pass.set_bind_group(0, &self.uniform_bind_group, &[slot(overlay_slot)]);
                 pass.set_vertex_buffer(0, self.vertex_buffer.slice(overlay_offset..needed));

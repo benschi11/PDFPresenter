@@ -42,7 +42,9 @@ cargo run --release -- ../../samples/sample.pdf
 | Pos1 / Ende | erste / letzte Folie |
 | Stift / linke Maustaste | zeichnen (Druck → Strichbreite) |
 | Radierer-Ende, Stifttaste, rechte Maustaste | Striche löschen |
+| Leiste oben | kompakte Stiftleiste für die Aufnahme: Presets, Radierer, ⚙ öffnet das Stift-Panel |
 | Tab | Stift-Panel: Farbe, Stärke, Stift/Textmarker, Presets (Esc oder Klick daneben schließt) |
+| F2 | kompakte Stiftleiste ein/aus |
 | 1 – 9 | Preset 1–9 wählen |
 | H / E | erster Textmarker-Preset / Radierer an/aus |
 | C · Strg+Z | Seite leeren · letzten Strich zurücknehmen |
@@ -51,5 +53,15 @@ cargo run --release -- ../../samples/sample.pdf
 | F1 | Messanzeige an/aus |
 | F11 · Esc | Vollbild an/aus · Vollbild verlassen |
 | Strg+Q | beenden |
+
+### Aufnahme mit OBS
+
+Die kompakte Stiftleiste liegt **oberhalb** der Folienfläche, nicht darüber. Für eine
+pixelgenaue 1080p-Aufnahme den Prototyp mit `--canvas 1920x1080` starten: Das Fenster wird dann
+so groß, dass die Folienfläche exakt 1920×1080 Pixel hat, zuzüglich 44 px Leiste (mal
+Windows-Skalierung). In OBS die Fensteraufnahme oben um die Leistenhöhe zuschneiden
+(Filter *Zuschneiden/Polster*, oben 44 px bei 100 % Skalierung). Den genauen Wert zeigt die
+Messanzeige (F1) bei Avalonia als „Folienfläche … ab y = … px“. Auf einem 1080p-Monitor im
+Vollbild die Leiste mit F2 ausblenden; dann bleiben nur Tastenkürzel (1–9, H, E).
 
 Testfolien neu erzeugen: `python3 samples/make_sample.py` (benötigt `reportlab`).

@@ -12,10 +12,13 @@ public sealed class MainWindow : Window
 {
     private readonly PresenterView _view;
     private readonly PenPicker _picker;
+    private readonly CompactBar _bar = new();
+    private readonly Options _options;
     private WindowState _stateBeforeFullscreen = WindowState.Normal;
 
     public MainWindow(Options options)
     {
+        _options = options;
         Width = 1280;
         Height = 720;
         Background = Brushes.Black;
@@ -27,11 +30,23 @@ public sealed class MainWindow : Window
             _view.Pen = _picker.Current;
             _view.Tool = Tool.Draw;
         };
+        _picker.PresetsChanged += RefreshBar;
         _picker.CloseRequested += ClosePicker;
-        Content = new Panel { Children = { _view, _picker } };
+        _bar.PresetClicked += i => _picker.SelectPreset(i);
+        _bar.EraserClicked += () => _view.Tool = _view.Tool == Tool.Eraser ? Tool.Draw : Tool.Eraser;
+        _bar.SettingsClicked += () => _picker.IsVisible = !_picker.IsVisible;
+
+        // Stiftleiste oben, darunter die Folienfläche; das große Stift-Panel liegt über der Folie.
+        DockPanel.SetDock(_bar, Dock.Top);
+        Content = new DockPanel { Children = { _bar, new Panel { Children = { _view, _picker } } } };
 
         Title = _view.Title;
-        _view.StatusChanged += () => Title = _view.Title;
+        _view.StatusChanged += () =>
+        {
+            Title = _view.Title;
+            RefreshBar();
+        };
+        RefreshBar();
         DragDrop.SetAllowDrop(this, true);
         AddHandler(DragDrop.DropEvent, OnDrop);
         // Tunnel-Handler: laufen vor den Steuerelementen, damit z. B. Leertaste immer blättert
@@ -42,10 +57,22 @@ public sealed class MainWindow : Window
         if (options.Fullscreen) WindowState = WindowState.FullScreen;
         Opened += async (_, _) =>
         {
+            if (options.Canvas is { } canvas && !options.Fullscreen) SizeForCanvas(canvas);
             _view.Focus();
             if (options.PdfPath is { } path) await _view.OpenAsync(path);
         };
     }
+
+    /// <summary>Fenstergröße so wählen, dass die Folienfläche exakt <paramref name="canvas"/> Pixel hat.</summary>
+    private void SizeForCanvas(PixelSize canvas)
+    {
+        double s = RenderScaling;
+        double bar = _bar.IsVisible ? CompactBar.BarHeight : 0;
+        Width = canvas.Width / s;
+        Height = canvas.Height / s + bar;
+    }
+
+    private void RefreshBar() => _bar.Refresh(_picker.Presets, _picker.Current, _view.Tool, _view.PageStatus);
 
     private void ClosePicker()
     {
@@ -79,6 +106,10 @@ public sealed class MainWindow : Window
                 break;
             case Key.F11:
                 ToggleFullscreen();
+                break;
+            case Key.F2:
+                _bar.IsVisible = !_bar.IsVisible;
+                if (_options.Canvas is { } canvas && WindowState != WindowState.FullScreen) SizeForCanvas(canvas);
                 break;
             case Key.Escape when WindowState == WindowState.FullScreen:
                 ToggleFullscreen();

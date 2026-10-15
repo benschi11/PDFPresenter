@@ -20,6 +20,11 @@ vergleichen** und entscheiden.
   (bezogen auf 1080p) mit Vorschau in Originalgröße, **Presets** (max. 12, Tasten 1–9) speichern
   und löschen. Ist das Panel offen, gehen Klicks ans Panel; ein Klick daneben schließt es, ohne
   zu zeichnen.
+- **Kompakte Stiftleiste** (für die Aufnahme) **oberhalb** der Folienfläche: nur die Presets,
+  Radierer, ⚙ für das große Stift-Panel und die Seitenzahl. Sie überdeckt die Folie nie und
+  wird in OBS weggeschnitten. F2 blendet sie aus. `--canvas WxH` macht das Fenster so groß, dass
+  die Folienfläche exakt WxH Pixel hat; auch beim Umschalten mit F2. Zeichnet man über den
+  oberen Folienrand hinaus, wird der Strich an der Folienkante abgeschnitten.
 - **Presets** liegen in `pen-presets.json` (Windows `%APPDATA%\PDFPresenter\`, Linux
   `~/.config/PDFPresenter/`). **Beide Prototypen nutzen dieselbe Datei**; die zuletzt gewählte
   Einstellung wird mitgespeichert.
@@ -46,6 +51,7 @@ Einstellungsdialog.
 | `Ink.cs` | Strichmodell, Zeichnen (Segmente mit runden Kappen bzw. ein Pfad beim Textmarker), Hit-Test |
 | `PenPicker.cs` | Stift-Panel aus Avalonia-Steuerelementen (`ColorSpectrum`/`ColorSlider` aus `Avalonia.Controls.ColorPicker`) |
 | `PenSettings.cs` | Preset-Modell, Laden/Speichern der JSON-Datei |
+| `CompactBar.cs` | kompakte Stiftleiste oberhalb der Folienfläche |
 
 Ebenen: PDF-Bitmap → gecachte Ink-Ebene (`RenderTargetBitmap`, fertige Striche
 inkrementell) → aktiver Strich. Gerendert wird bei Bedarf. Während des Crossfades (oder mit
@@ -64,7 +70,7 @@ SkiaSharp-Versionskonflikte mit Avalonia zu vermeiden. Die Native-Binaries komme
 | `src/pdf.rs` | PDFium-Thread (`pdfium-render`), Aufträge per Kanal, Weckruf über `EventLoopProxy` |
 | `src/gpu.rs` | wgpu: Pipelines, Seitentexturen, Komposit-Texturen, Frame-Rendering |
 | `src/ink.rs` | Strichmodell, Tessellierung (Trapez pro Segment + Kreis pro Punkt), Hit-Test |
-| `src/picker.rs` | Stift-Panel, selbst gezeichnet aus Dreiecken (Farbfeld als Raster mit Eckfarben, Zahlen als Siebensegment-Ziffern) |
+| `src/picker.rs` | kompakte Stiftleiste und Stift-Panel, selbst gezeichnet aus Dreiecken (Farbfeld als Raster mit Eckfarben, Zahlen als Siebensegment-Ziffern) |
 | `src/presets.rs` | Preset-Modell, JSON (serde), HSV-Umrechnung, Tests |
 | `src/main.rs` | Fenster, Eingabe, Navigation, Messwerte |
 

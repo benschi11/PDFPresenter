@@ -52,6 +52,8 @@ public sealed class PenPicker : Border
     /// <summary>Aktuelle Einstellung wurde geändert (Klick, Preset, Taste).</summary>
     public event Action? Changed;
     public event Action? CloseRequested;
+    /// <summary>Preset hinzugefügt oder gelöscht.</summary>
+    public event Action? PresetsChanged;
 
     public PenPicker(PenSettingsFile settings)
     {
@@ -61,7 +63,7 @@ public sealed class PenPicker : Border
         BorderThickness = new Thickness(1);
         CornerRadius = new CornerRadius(10);
         Padding = new Thickness(14);
-        Margin = new Thickness(20);
+        Margin = new Thickness(20, 10);
         HorizontalAlignment = HorizontalAlignment.Left;
         VerticalAlignment = VerticalAlignment.Center;
         BoxShadow = BoxShadows.Parse("0 4 24 0 #80000000");
@@ -125,6 +127,7 @@ public sealed class PenPicker : Border
             _settings.Presets.Add(Current);
             Persist();
             Sync();
+            PresetsChanged?.Invoke();
         };
         _deletePreset.Click += (_, _) =>
         {
@@ -133,12 +136,19 @@ public sealed class PenPicker : Border
             _settings.Presets.RemoveAt(i);
             Persist();
             Sync();
+            PresetsChanged?.Invoke();
         };
 
-        Child = new StackPanel
+        // Scrollbar, falls die Folienfläche niedriger ist als das Panel (z. B. 720p-Fenster).
+        Child = new ScrollViewer
+        {
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Content = new StackPanel
         {
             Spacing = 10,
             Width = 290,
+            Margin = new Thickness(0, 0, 12, 0),
             Children =
             {
                 header,
@@ -164,11 +174,13 @@ public sealed class PenPicker : Border
                     FontSize = 11, Opacity = 0.6,
                 },
             },
+        },
         };
         Sync();
     }
 
     public PenPreset Current => _settings.Current;
+    public IReadOnlyList<PenPreset> Presets => _settings.Presets;
 
     public void Toggle() => IsVisible = !IsVisible;
 
