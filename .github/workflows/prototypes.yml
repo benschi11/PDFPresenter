@@ -1,0 +1,83 @@
+# Baut beide Prototypen für Windows und Linux und stellt sie als Download-Artefakte bereit
+# (Actions → Lauf auswählen → Artifacts). So lassen sie sich ohne lokale Toolchain testen.
+name: Prototypen
+
+on:
+  push:
+    paths: ["prototypes/**", "samples/**", ".github/workflows/prototypes.yml"]
+  pull_request:
+    paths: ["prototypes/**", "samples/**", ".github/workflows/prototypes.yml"]
+  workflow_dispatch:
+
+jobs:
+  avalonia:
+    name: Avalonia (${{ matrix.rid }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, rid: win-x64 }
+          - { os: ubuntu-latest, rid: linux-x64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Veröffentlichen
+        run: >
+          dotnet publish prototypes/avalonia/PdfPresenter.Avalonia.csproj
+          -c Release -r ${{ matrix.rid }} --self-contained true -o out
+      - name: Testfolien beilegen
+        shell: bash
+        run: cp samples/sample.pdf out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pdfpresenter-avalonia-${{ matrix.rid }}
+          path: out/
+
+  rust:
+    name: Rust (${{ matrix.rid }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, rid: win-x64, exe: pdfpresenter-rust.exe }
+          - { os: ubuntu-latest, rid: linux-x64, exe: pdfpresenter-rust }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: prototypes/rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: prototypes/rust
+      - name: Format & Clippy
+        if: runner.os == 'Linux'
+        run: |
+          cargo fmt --check
+          cargo clippy --release -- -D warnings
+      - name: Bauen
+        run: cargo build --release
+      - name: PDFium laden (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/fetch-pdfium.ps1 ${{ matrix.rid }}
+      - name: PDFium laden (Linux)
+        if: runner.os == 'Linux'
+        run: sh scripts/fetch-pdfium.sh ${{ matrix.rid }}
+      - name: Paket zusammenstellen
+        shell: bash
+        run: |
+          mkdir -p out
+          cp target/release/${{ matrix.exe }} out/
+          cp pdfium/* out/
+          cp ../../samples/sample.pdf out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pdfpresenter-rust-${{ matrix.rid }}
+          path: prototypes/rust/out/

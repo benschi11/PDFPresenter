@@ -1,0 +1,19 @@
+[package]
+name = "pdfpresenter-rust"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Prototyp B: PDF-Präsentation mit Crossfade und Stift-Annotationen auf wgpu"
+license = "Apache-2.0"
+
+[dependencies]
+# 0.31 (Beta) wegen der neuen Pointer-API: liefert Stift als TabletTool inkl. Druck,
+# Radierer-Ende und Unterscheidung Stift/Finger (Windows + Wayland). 0.30 meldet den Stift nur als Touch.
+winit = "=0.31.0-beta.3"
+wgpu = "30"
+pdfium-render = { version = "0.9", default-features = false, features = ["pdfium_latest", "thread_safe"] }
+pollster = "1"
+bytemuck = { version = "1", features = ["derive"] }
+
+[profile.release]
+debug = 1
