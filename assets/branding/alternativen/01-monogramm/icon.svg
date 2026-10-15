@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>Kreidezeit</title>
+  <rect width="512" height="512" rx="112" fill="#22334A"/>
+  <path fill="#F5F2EA" d="M136 104H192L232 144V388A20 20 0 0 1 212 408H136A20 20 0 0 1 116 388V124A20 20 0 0 1 136 104Z"/>
+  <path fill="#C9D2DC" d="M192 104L232 144H204A12 12 0 0 1 192 132Z"/>
+  <path d="M372 122L238 256L376 390" fill="none" stroke="#22334A" stroke-width="94" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M372 122L238 256L376 390" fill="none" stroke="#FFB13D" stroke-width="66" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
