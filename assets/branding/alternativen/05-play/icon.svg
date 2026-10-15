@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>Kreidezeit</title>
+  <defs>
+    <linearGradient id="kp-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5A2BE0"/>
+      <stop offset=".55" stop-color="#C4329E"/>
+      <stop offset="1" stop-color="#FF6A4D"/>
+    </linearGradient>
+    <radialGradient id="kp-glow" cx=".22" cy=".14" r=".75">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity=".28"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <!-- Squircle mit kraeftigem Verlauf -->
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="url(#kp-bg)"/>
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="url(#kp-glow)"/>
+  <!-- Play-Dreieck aus einem Kreidestrich -->
+  <path d="M206 346 C196 286 194 212 202 156 C205 139 218 133 234 141 C290 170 346 204 390 234 C407 246 407 262 390 273 C330 310 256 352 184 384" fill="none" stroke="#1F1340" stroke-opacity=".16" stroke-width="46" stroke-linecap="round" stroke-linejoin="round" transform="translate(0 8)"/>
+  <path d="M206 346 C196 286 194 212 202 156 C205 139 218 133 234 141 C290 170 346 204 390 234 C407 246 407 262 390 273 C330 310 256 352 184 384" fill="none" stroke="#FFF7EC" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Trockene Kreide am Strichende: zwei Aussparungen -->
+  <path d="M300 320 C268 338 238 354 212 366" fill="none" stroke="#C4329E" stroke-opacity=".55" stroke-width="5" stroke-linecap="round" stroke-dasharray="26 14 40 200"/>
+  <path d="M286 336 C262 349 240 360 222 368" fill="none" stroke="#C4329E" stroke-opacity=".4" stroke-width="4" stroke-linecap="round" stroke-dasharray="18 12 24 200"/>
+  <!-- Aufnahme-Punkt -->
+  <circle cx="388" cy="132" r="36" fill="#FFF7EC"/>
+  <circle cx="388" cy="132" r="22" fill="#FF6A4D"/>
+</svg>
