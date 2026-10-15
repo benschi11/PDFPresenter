@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>Kreidezeit</title>
+  <defs>
+    <linearGradient id="wa-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2A3A8C"/><stop offset="1" stop-color="#151C4A"/></linearGradient>
+    <linearGradient id="wa-dino" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8BE85E"/><stop offset="1" stop-color="#3CC25A"/></linearGradient>
+    <clipPath id="wa-clip"><rect width="512" height="512" rx="116"/></clipPath>
+  </defs>
+  <g clip-path="url(#wa-clip)">
+    <rect width="512" height="512" fill="url(#wa-bg)"/>
+    <!-- Kreidewelle, die der Rex gerade an die Tafel geschrieben hat -->
+    <path d="M286 470C306 420 334 418 352 452S396 484 424 418" fill="none" stroke="#FFF6D6" stroke-opacity=".10" stroke-width="36" stroke-linecap="round"/>
+    <path d="M286 470C306 420 334 418 352 452S396 484 424 418" fill="none" stroke="#FFF6D6" stroke-width="20" stroke-linecap="round"/>
+    <!-- Maulinneres -->
+    <path d="M300 262L460 230L440 276Z" fill="#7A1E3A"/>
+    <!-- Kopf -->
+    <path d="M96 560C92 430 112 330 146 262C172 204 212 152 270 136C300 128 324 132 344 142C384 152 424 150 448 164C474 178 478 218 458 234L304 262L428 274C452 278 456 306 438 316C398 338 330 348 276 346C246 362 240 430 244 560Z" fill="url(#wa-dino)"/>
+    <!-- Rückenzacken -->
+    <path d="M150 256L118 236L160 222ZM180 194L156 166L198 166ZM222 154L214 120L250 140Z" fill="#1F7A3E"/>
+    <!-- Unterkiefer vor der Kreide -->
+    <path d="M330 268L428 274C452 278 456 306 438 316C398 338 330 348 276 346L304 262Z" fill="url(#wa-dino)"/>
+    <!-- Kreide im Maul -->
+    <g transform="translate(430 412) rotate(-24)">
+      <rect x="-19" y="-162" width="38" height="162" rx="10" fill="#FFD23F"/>
+      <rect x="-19" y="-162" width="13" height="162" rx="6" fill="#FFFFFF" opacity=".45"/>
+      <path d="M-19 -22H19V-10A10 10 0 0 1 9 0H-9A10 10 0 0 1 -19 -10Z" fill="#FFF6D6"/>
+    </g>
+    <!-- Zähne -->
+    <path d="M436 238L428 256L418 240ZM404 244L396 262L386 246ZM372 250L364 266L354 252Z" fill="#FFFFFF"/>
+    <!-- Mini-Ärmchen, das die Kreide nicht erreicht -->
+    <path d="M248 372C268 366 286 368 298 376" fill="none" stroke="#3CC25A" stroke-width="18" stroke-linecap="round"/>
+    <path d="M296 376L312 366M296 376L312 384" fill="none" stroke="#3CC25A" stroke-width="9" stroke-linecap="round"/>
+    <!-- Nasenloch, Auge, Braue -->
+    <ellipse cx="446" cy="186" rx="9" ry="6" fill="#1F7A3E"/>
+    <circle cx="318" cy="190" r="30" fill="#FFFFFF"/>
+    <circle cx="332" cy="200" r="15" fill="#151C4A"/>
+    <circle cx="337" cy="194" r="5" fill="#FFFFFF"/>
+    <path d="M282 152C304 140 334 142 356 156" fill="none" stroke="#1F7A3E" stroke-width="14" stroke-linecap="round"/>
+    <!-- Bäckchen -->
+    <ellipse cx="282" cy="242" rx="18" ry="11" fill="#FF5C8A" opacity=".7"/>
+  </g>
+</svg>

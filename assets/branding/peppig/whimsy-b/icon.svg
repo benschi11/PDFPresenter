@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>Kreidezeit</title>
+  <defs>
+    <linearGradient id="wb-bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FF8A3D"/><stop offset="1" stop-color="#EE2F6E"/></linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="url(#wb-bg)"/>
+  <!-- Rückenplatten (hinter dem Bein des K) -->
+  <path d="M271.4 295.8L327.7 284.6L336.3 227.8L280.0 239.0Z" fill="#22C4B0" stroke="#22C4B0" stroke-width="22" stroke-linejoin="round"/><path d="M308.1 330.9L373.6 317.4L384.1 251.4L318.6 264.9Z" fill="#FFD23F" stroke="#FFD23F" stroke-width="22" stroke-linejoin="round"/><path d="M344.8 366.0L399.0 354.2L408.4 299.5L354.2 311.3Z" fill="#22C4B0" stroke="#22C4B0" stroke-width="22" stroke-linejoin="round"/>
+  <g fill="none" stroke="#FFF6E3" stroke-linecap="round">
+    <!-- Stamm = Kreidestück -->
+    <path d="M158 132V388" stroke-width="80"/>
+    <!-- Hals -->
+    <path d="M194 300L338 160" stroke-width="72"/>
+    <!-- Schwanz/Bein -->
+    <path d="M236 262L372 392" stroke-width="72"/>
+  </g>
+  <!-- Kopf -->
+  <path d="M308 186C304 128 344 96 392 98C432 100 458 118 460 146C462 172 432 184 392 182C364 181 346 190 336 204Z" fill="#FFF6E3"/>
+  <circle cx="380" cy="132" r="16" fill="#2A1638"/>
+  <circle cx="386" cy="126" r="5.5" fill="#FFFFFF"/>
+  <path d="M410 164Q428 168 444 156" fill="none" stroke="#2A1638" stroke-width="8" stroke-linecap="round"/>
+  <ellipse cx="444" cy="128" rx="5" ry="4" fill="#2A1638"/>
+  <ellipse cx="406" cy="150" rx="12" ry="7" fill="#EE2F6E" opacity=".4"/>
+  <!-- Kreidestaub am Stammende -->
+  <path d="M118 352H198V388A40 40 0 0 1 118 388Z" fill="#FFD23F"/>
+</svg>
