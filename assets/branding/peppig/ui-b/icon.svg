@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>Kreidezeit</title>
+  <defs>
+    <linearGradient id="b-bg" x1="16" y1="496" x2="496" y2="16" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2B3BFF"/>
+      <stop offset=".55" stop-color="#3E6BFF"/>
+      <stop offset="1" stop-color="#1AA8FF"/>
+    </linearGradient>
+    <clipPath id="b-clip"><path d="M128 16H384A112 112 0 0 1 496 128V384A112 112 0 0 1 384 496H128A112 112 0 0 1 16 384V128A112 112 0 0 1 128 16Z"/></clipPath>
+  </defs>
+  <path fill="url(#b-bg)" d="M128 16H384A112 112 0 0 1 496 128V384A112 112 0 0 1 384 496H128A112 112 0 0 1 16 384V128A112 112 0 0 1 128 16Z"/>
+  <circle cx="420" cy="92" r="190" fill="#FFFFFF" fill-opacity=".07" clip-path="url(#b-clip)"/>
+  <g transform="translate(10 14)" opacity=".28" fill="#0B1440" stroke="#0B1440"><path d="M136 104A24 24 0 0 1 160 80H204A24 24 0 0 1 228 104V408A24 24 0 0 1 204 432H160A24 24 0 0 1 136 408Z" stroke="none"/><path d="M372 112L256 262L384 404" fill="none" stroke-width="68" stroke-linecap="round" stroke-linejoin="round"/></g>
+  <path fill="#FFD60A" d="M136 104A24 24 0 0 1 160 80H204A24 24 0 0 1 228 104V408A24 24 0 0 1 204 432H160A24 24 0 0 1 136 408Z"/>
+  <path fill="#FFFFFF" fill-opacity=".45" d="M150 104A12 12 0 0 1 162 92H170V420H162A12 12 0 0 1 150 408Z"/>
+  <path fill="#E0A800" d="M136 380H228V408A24 24 0 0 1 204 432H160A24 24 0 0 1 136 408Z"/>
+  <path d="M372 112L256 262L384 404" fill="none" stroke="#FFFFFF" stroke-width="68" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M410 60L432 30M440 96L478 84M424 154L452 172" stroke="#FFD60A" stroke-width="16" stroke-linecap="round" clip-path="url(#b-clip)"/>
+  <circle cx="418" cy="444" r="12" fill="#FFFFFF" fill-opacity=".7"/><circle cx="450" cy="420" r="7" fill="#FFFFFF" fill-opacity=".5"/>
+</svg>
