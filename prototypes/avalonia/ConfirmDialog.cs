@@ -9,9 +9,9 @@ public enum SaveChoice { Save, Discard, Cancel }
 /// <summary>Kleine Rückfrage „Änderungen speichern?“ mit Speichern / Verwerfen / Abbrechen.</summary>
 public sealed class ConfirmDialog : Window
 {
-    private ConfirmDialog(string text)
+    private ConfirmDialog(string text, bool yesNo = false)
     {
-        Title = "Ungespeicherte Annotationen";
+        Title = "Ungespeicherte Änderungen";
         SizeToContent = SizeToContent.WidthAndHeight;
         CanResize = false;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
@@ -35,10 +35,17 @@ public sealed class ConfirmDialog : Window
                     Orientation = Orientation.Horizontal,
                     Spacing = 8,
                     HorizontalAlignment = HorizontalAlignment.Right,
-                    Children = { Make("Speichern", SaveChoice.Save, isDefault: true), Make("Verwerfen", SaveChoice.Discard), cancel },
+                    Children = { Make(yesNo ? "Ja" : "Speichern", SaveChoice.Save, isDefault: !yesNo), Make(yesNo ? "Nein" : "Verwerfen", SaveChoice.Discard), cancel },
                 },
             },
         };
+    }
+
+    /// <summary>Einfache Ja/Nein-Frage; true = Ja.</summary>
+    public static async Task<bool?> AskYesNoAsync(Window owner, string text)
+    {
+        var dialog = new ConfirmDialog(text, yesNo: true) { Title = "Bitte bestätigen" };
+        return await dialog.ShowDialog<SaveChoice?>(owner) == SaveChoice.Save;
     }
 
     public static async Task<SaveChoice> AskAsync(Window owner, string text) =>

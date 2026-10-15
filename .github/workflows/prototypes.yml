@@ -24,6 +24,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
+      - name: Tests
+        run: dotnet test prototypes/avalonia-tests/PdfPresenter.Tests.csproj
       - name: Veröffentlichen
         run: >
           dotnet publish prototypes/avalonia/PdfPresenter.Avalonia.csproj

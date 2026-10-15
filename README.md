@@ -42,15 +42,28 @@ cargo run --release -- ../../samples/sample.pdf
 
 ## Bedienung (beide Prototypen)
 
-Menü (nur Avalonia): **Datei** → PDF öffnen (Strg+O), Annotationen speichern (Strg+S),
-Als PDF exportieren (Strg+E), Beenden · **Ansicht** → Stift-Panel, Kopfbereich, Messanzeige, Vollbild.
+Menü (nur Avalonia):
+- **Datei** → Neues Blatt (Strg+N), Öffnen (Strg+O, PDF oder `.pdfp`), Speichern (Strg+S),
+  Als PDF exportieren (Strg+E), Beenden
+- **Seite** → Leeres Blatt einfügen (Strg+Umschalt+N, auch „＋ Seite“ in der Stiftleiste),
+  Seite löschen, Hintergrund (blanko / kariert / liniert / punktiert), Abstand (4–10 mm),
+  Format (16:9, A4 hoch, A4 quer)
+- **Ansicht** → Stift-Panel, Kopfbereich, Messanzeige, Vollbild
 
-- **Speichern** schreibt die Annotationen in eine Begleitdatei `<datei>.pdf.annot.json` neben
-  dem PDF. Das Original bleibt unverändert, und beim nächsten Öffnen sind die Striche wieder da.
-  Ungespeicherte Änderungen zeigt ein ● im Fenstertitel; vor dem Schließen oder Öffnen eines
-  anderen PDFs fragt die App nach.
-- **Exportieren** erzeugt ein neues PDF, in dem die Striche als Vektorgrafik eingezeichnet sind.
-  Ohne Oberfläche geht das auch per Kommandozeile:
+Papier und Tafel:
+- Papierseiten lassen sich zwischen PDF-Folien einfügen (z. B. für Nebenrechnungen) oder als
+  reines Tafel-Dokument ohne PDF nutzen (Strg+N). Im Tafel-Dokument hängt die Leertaste auf der
+  letzten Seite automatisch ein neues Blatt an.
+- Abstände sind echte Millimeter der Seite (Karo 5 mm, Linien 8 mm), das Karo ist mittig
+  ausgerichtet. Hintergrund/Format gelten für die aktuelle Papierseite und als Vorgabe für neue.
+
+Speichern und Export:
+- **Speichern** – Dokument mit PDF: Begleitdatei `<datei>.pdf.annot.json` neben dem PDF
+  (Striche, eingefügte/gelöschte Seiten; das PDF bleibt unverändert, beim nächsten Öffnen ist
+  alles wieder da). Dokument ohne PDF: eigene Datei `.pdfp`. Ungespeicherte Änderungen zeigt ein
+  ● im Fenstertitel; vor dem Schließen oder Öffnen fragt die App nach.
+- **Exportieren** erzeugt ein neues PDF in der Seitenreihenfolge der App: PDF-Folien,
+  Papierseiten (Raster als Vektorlinien) und alle Striche als Vektorgrafik. Ohne Oberfläche:
   `PdfPresenter.Avalonia folien.pdf --export folien-annotiert.pdf`.
 
 | Taste / Eingabe | Funktion |

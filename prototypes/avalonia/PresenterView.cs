@@ -10,9 +10,10 @@ using Avalonia.Threading;
 namespace PdfPresenter;
 
 /// <summary>
-/// Zeigt eine PDF-Seite randlos an, blendet beim Blättern über und nimmt Stiftstriche entgegen.
-/// Gezeichnet wird in drei Schichten: PDF-Bitmap → gecachte Ink-Ebene (fertige Striche) →
-/// aktiver Strich (wird jeden Frame neu gezeichnet).
+/// Zeigt eine Seite (PDF oder Papier) randlos an, blendet beim Blättern über und nimmt
+/// Stiftstriche entgegen. Gezeichnet wird in drei Schichten: Seiten-Bitmap (PDF bzw. Papier) →
+/// gecachte Ink-Ebene (fertige Striche) → aktiver Strich (wird jeden Frame neu gezeichnet).
+/// Caches hängen am Seitenobjekt, damit Einfügen/Löschen von Seiten nichts durcheinanderbringt.
 /// </summary>
 public sealed class PresenterView : Control
 {
@@ -21,21 +22,20 @@ public sealed class PresenterView : Control
 
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private readonly Options _options;
-    private PdfDocument? _doc;
+    private Deck? _deck;
     private string? _error;
 
     // Seiten-Bitmaps (exakt in Zielpixelgröße) und laufende Render-Aufträge
-    private readonly Dictionary<int, Bitmap> _pageBitmaps = new();
-    private readonly HashSet<(int Page, PixelSize Size)> _inFlight = new();
+    private readonly Dictionary<Page, Bitmap> _pageBitmaps = new();
+    private readonly HashSet<(Page Page, PixelSize Size)> _inFlight = new();
     private PixelSize _targetSize;
 
-    // Annotationen pro Seite + gecachte Ink-Ebenen (nur für sichtbare Seiten)
-    private readonly Dictionary<int, List<Stroke>> _ink = new();
-    private readonly Dictionary<int, RenderTargetBitmap> _inkLayers = new();
+    // gecachte Ink-Ebenen (nur für sichtbare Seiten)
+    private readonly Dictionary<Page, RenderTargetBitmap> _inkLayers = new();
 
     // Navigation / Überblendung
     private int _page;
-    private int _fromPage = -1;
+    private Page? _fromPage;
     private double _fadeStartMs = double.NaN;
     private bool _fadePending;
     private int _fadeMs;
@@ -86,14 +86,15 @@ public sealed class PresenterView : Control
         Cursor = new Cursor(StandardCursorType.Cross);
     }
 
-    public string Title => _doc is null
+    public string Title => _deck is null
         ? "PDF-Presenter (Avalonia)"
-        : $"{(IsDirty ? "● " : "")}{System.IO.Path.GetFileName(CurrentPath)} – Seite {_page + 1}/{_doc.PageCount} – PDF-Presenter (Avalonia)";
+        : $"{(IsDirty ? "● " : "")}{_deck.Name} – Seite {_page + 1}/{_deck.Pages.Count} – PDF-Presenter (Avalonia)";
 
-    /// <summary>Pfad des geöffneten PDFs.</summary>
-    public string? CurrentPath { get; private set; }
-    public PdfDocument? Document => _doc;
-    public IReadOnlyDictionary<int, List<Stroke>> Ink => _ink;
+    public Deck? Deck => _deck;
+    public Page? CurrentPage => _deck?.Pages[_page];
+
+    /// <summary>Vorgabe für neu eingefügte Papierseiten (zuletzt gewähltes Papier).</summary>
+    public Paper DefaultPaper { get; set; } = Paper.Default;
 
     /// <summary>Annotationen seit dem letzten Speichern geändert.</summary>
     public bool IsDirty { get; private set; }
@@ -111,34 +112,26 @@ public sealed class PresenterView : Control
         StatusChanged?.Invoke();
     }
 
-    public string PageStatus => _doc is null ? "" : $"Seite {_page + 1}/{_doc.PageCount}";
+    public string PageStatus => _deck is null ? "" : $"Seite {_page + 1}/{_deck.Pages.Count}";
 
+    /// <summary>Öffnet ein PDF (mit Begleitdatei) oder ein Tafel-Dokument (.pdfp).</summary>
     public async Task OpenAsync(string path)
     {
         try
         {
-            var doc = await PdfDocument.OpenAsync(path);
-            _doc?.Dispose();
-            _doc = doc;
-            CurrentPath = path;
-            IsDirty = false;
-            _pageBitmaps.Clear();
-            _ink.Clear();
-            // Gespeicherte Annotationen aus der Begleitdatei übernehmen
-            try
+            Deck deck;
+            if (path.EndsWith(DocumentFile.Extension, StringComparison.OrdinalIgnoreCase))
             {
-                foreach (var (page, strokes) in AnnotationFile.Load(path))
-                    if (page >= 0 && page < doc.PageCount) _ink[page] = strokes;
+                deck = DocumentFile.LoadPdfp(path);
             }
-            catch (Exception ex)
+            else
             {
-                Notice?.Invoke($"Annotationen nicht lesbar: {ex.Message}");
+                deck = Deck.FromPdf(await PdfDocument.OpenAsync(path), path);
+                // Gespeicherte Annotationen und eingefügte Seiten aus der Begleitdatei übernehmen
+                try { DocumentFile.ApplySidecar(deck); }
+                catch (Exception ex) { Notice?.Invoke($"Annotationen nicht lesbar: {ex.Message}"); }
             }
-            ClearInkLayers();
-            _page = 0;
-            _fromPage = -1;
-            _error = null;
-            RequestPages();
+            SetDeck(deck);
         }
         catch (Exception ex)
         {
@@ -149,18 +142,87 @@ public sealed class PresenterView : Control
         InvalidateVisual();
     }
 
+    /// <summary>Neues Tafel-Dokument ohne PDF mit einer Papierseite.</summary>
+    public void NewBlank(Paper paper)
+    {
+        DefaultPaper = paper;
+        SetDeck(Deck.Blank(paper));
+        StatusChanged?.Invoke();
+        InvalidateVisual();
+    }
+
+    private void SetDeck(Deck deck)
+    {
+        CommitActiveStroke();
+        _deck?.Dispose();
+        _deck = deck;
+        IsDirty = false;
+        foreach (var b in _pageBitmaps.Values) b.Dispose();
+        _pageBitmaps.Clear();
+        ClearInkLayers();
+        _page = 0;
+        _fromPage = null;
+        _fadePending = false;
+        _error = null;
+        RequestPages();
+    }
+
+    // ──────────────────────────── Seitenverwaltung ────────────────────────────
+
+    /// <summary>Papierseite nach der aktuellen einfügen und hinblättern.</summary>
+    public void InsertPaperPage(Paper? paper = null)
+    {
+        if (_deck is null) return;
+        paper ??= CurrentPage is PaperPage cur ? cur.Paper : DefaultPaper;
+        _deck.Pages.Insert(_page + 1, new PaperPage(paper));
+        MarkDirty();
+        GoTo(_page + 1);
+    }
+
+    /// <summary>Aktuelle Seite aus dem Dokument entfernen (das PDF selbst bleibt unverändert).</summary>
+    public bool DeleteCurrentPage()
+    {
+        if (_deck is null || _deck.Pages.Count <= 1) return false;
+        CommitActiveStroke();
+        var page = _deck.Pages[_page];
+        _deck.Pages.RemoveAt(_page);
+        if (_pageBitmaps.Remove(page, out var b)) b.Dispose();
+        if (_inkLayers.Remove(page, out var l)) l.Dispose();
+        _fromPage = null;
+        _page = Math.Min(_page, _deck.Pages.Count - 1);
+        MarkDirty();
+        RequestPages();
+        StatusChanged?.Invoke();
+        InvalidateVisual();
+        return true;
+    }
+
+    /// <summary>Hintergrund der aktuellen Papierseite ändern; wird auch Vorgabe für neue Seiten.</summary>
+    public void SetCurrentPaper(Paper paper)
+    {
+        DefaultPaper = paper;
+        if (CurrentPage is not PaperPage page || page.Paper == paper) return;
+        page.Paper = paper;
+        if (_pageBitmaps.Remove(page, out var b)) b.Dispose();
+        if (_inkLayers.Remove(page, out var l)) l.Dispose();
+        MarkDirty();
+        RequestPages();
+        StatusChanged?.Invoke();
+        InvalidateVisual();
+    }
+
     // ───────────────────────────── Navigation ─────────────────────────────
 
     public void GoTo(int page)
     {
-        if (_doc is null) return;
-        page = Math.Clamp(page, 0, _doc.PageCount - 1);
+        if (_deck is null) return;
+        page = Math.Clamp(page, 0, _deck.Pages.Count - 1);
         if (page == _page) return;
         CommitActiveStroke();
 
-        _fromPage = _page;
+        _fromPage = _deck.Pages[_page];
         _page = page;
-        if (_pageBitmaps.ContainsKey(page)) StartFade();
+        if (_pageBitmaps.ContainsKey(_deck.Pages[page])) StartFade();
         else _fadePending = true; // Überblendung startet, sobald die Seite gerendert ist
 
         RequestPages();
@@ -168,7 +230,12 @@ public sealed class PresenterView : Control
         InvalidateVisual();
     }
 
-    public void Next() => GoTo(_page + 1);
+    /// <summary>Weiterblättern; im Tafel-Dokument ohne PDF entsteht am Ende ein neues Blatt.</summary>
+    public void Next()
+    {
+        if (_deck is { Pdf: null } deck && _page == deck.Pages.Count - 1) InsertPaperPage();
+        else GoTo(_page + 1);
+    }
     public void Previous() => GoTo(_page - 1);
 
     private void StartFade()
@@ -181,10 +248,10 @@ public sealed class PresenterView : Control
     /// <summary>Überblend-Fortschritt 0..1, oder null wenn keine Überblendung läuft.</summary>
     private double? FadeProgress(double nowMs)
     {
-        if (_fromPage < 0 || _fadePending) return _fadePending ? 0 : null;
-        if (_fadeMs <= 0) { _fromPage = -1; return null; }
+        if (_fromPage is null || _fadePending) return _fadePending ? 0 : null;
+        if (_fadeMs <= 0) { _fromPage = null; return null; }
         double t = (nowMs - _fadeStartMs) / _fadeMs;
-        if (t >= 1) { _fromPage = -1; return null; }
+        if (t >= 1) { _fromPage = null; return null; }
         return t * t * (3 - 2 * t); // smoothstep
     }
 
@@ -219,26 +286,20 @@ public sealed class PresenterView : Control
         InvalidateVisual();
     }
 
-    private List<Stroke> StrokesOf(int page)
-    {
-        if (!_ink.TryGetValue(page, out var list)) _ink[page] = list = [];
-        return list;
-    }
-
     private void ClearPage()
     {
-        if (StrokesOf(_page).Count > 0) MarkDirty();
-        StrokesOf(_page).Clear();
-        InvalidateInkLayer(_page);
+        if (CurrentPage is not { } page || page.Strokes.Count == 0) return;
+        page.Strokes.Clear();
+        MarkDirty();
+        InvalidateInkLayer(page);
     }
 
     private void Undo()
     {
-        var list = StrokesOf(_page);
-        if (list.Count == 0) return;
-        list.RemoveAt(list.Count - 1);
+        if (CurrentPage is not { Strokes.Count: > 0 } page) return;
+        page.Strokes.RemoveAt(page.Strokes.Count - 1);
         MarkDirty();
-        InvalidateInkLayer(_page);
+        InvalidateInkLayer(page);
     }
 
     // ─────────────────────────────── Zeiger ────────────────────────────────
@@ -258,7 +319,7 @@ public sealed class PresenterView : Control
         var pt = e.GetCurrentPoint(this);
         NotePointer(e.Pointer.Type, pt.Properties.Pressure, now);
 
-        if (_doc is null || !Accept(e.Pointer.Type, now)) return;
+        if (_deck is null || !Accept(e.Pointer.Type, now)) return;
 
         // Stift setzt auf, während ein Finger-/Handballenstrich läuft → den verwerfen.
         if (e.Pointer.Type == PointerType.Pen && _activePointerType == PointerType.Touch && _active is not null)
@@ -337,7 +398,7 @@ public sealed class PresenterView : Control
 
     private void AddPoint(PointerPoint pt)
     {
-        if (_active is null || _doc is null) return;
+        if (_active is null || _deck is null) return;
         var p = ScreenToPage(pt.Position);
         float pressure = pt.Pointer.Type == PointerType.Mouse ? 0.5f : pt.Properties.Pressure;
         // gleicher Ort wie zuvor (z. B. Druck-Update ohne Bewegung): nur Druck übernehmen
@@ -355,11 +416,11 @@ public sealed class PresenterView : Control
         _active = null;
         _activePointerId = null;
         _erasing = false;
-        if (stroke is null || stroke.Points.Count == 0) return;
-        StrokesOf(_page).Add(stroke);
+        if (stroke is null || stroke.Points.Count == 0 || CurrentPage is not { } page) return;
+        page.Strokes.Add(stroke);
         MarkDirty();
         // inkrementell in die vorhandene Ink-Ebene zeichnen statt alles neu aufzubauen
-        if (_inkLayers.TryGetValue(_page, out var layer))
+        if (_inkLayers.TryGetValue(page, out var layer))
         {
             using var ctx = layer.CreateDrawingContext(false);
             stroke.Draw(ctx, Matrix.CreateScale(layer.PixelSize.Height, layer.PixelSize.Height));
@@ -370,12 +431,13 @@ public sealed class PresenterView : Control
     private void EraseAt(Point screen)
     {
         _eraserPos = screen;
+        if (CurrentPage is not { } page) return;
         var p = ScreenToPage(screen);
-        int removed = StrokesOf(_page).RemoveAll(s => s.HitTest(p, EraserRadius));
+        int removed = page.Strokes.RemoveAll(s => s.HitTest(p, EraserRadius));
         if (removed > 0)
         {
             MarkDirty();
-            InvalidateInkLayer(_page);
+            InvalidateInkLayer(page);
         }
     }
 
@@ -387,14 +449,14 @@ public sealed class PresenterView : Control
     /// Zielrechteck der Seite in physischen Pixeln. Passt das Seitenverhältnis (±1 %),
     /// wird die Fläche komplett gefüllt – randlos. Sonst wird eingepasst und zentriert.
     /// </summary>
-    private PixelRect DestPixels(int page)
+    private PixelRect DestPixels(Page? page)
     {
         var s = Scaling;
         int vw = Math.Max(1, (int)Math.Round(Bounds.Width * s));
         int vh = Math.Max(1, (int)Math.Round(Bounds.Height * s));
-        if (_doc is null) return new PixelRect(0, 0, vw, vh);
+        if (page is null) return new PixelRect(0, 0, vw, vh);
 
-        var ps = _doc.PageSizes[page];
+        var ps = page.SizePt;
         double pageAspect = ps.Width / ps.Height, viewAspect = (double)vw / vh;
         if (Math.Abs(pageAspect - viewAspect) / pageAspect < 0.01) return new PixelRect(0, 0, vw, vh);
         if (pageAspect > viewAspect)
@@ -406,7 +468,7 @@ public sealed class PresenterView : Control
         return new PixelRect((vw - w) / 2, 0, w, vh);
     }
 
-    private Rect DestDip(int page)
+    private Rect DestDip(Page? page)
     {
         var r = DestPixels(page);
         var s = Scaling;
@@ -415,17 +477,17 @@ public sealed class PresenterView : Control
 
     private Point ScreenToPage(Point screen)
     {
-        var d = DestDip(_page);
+        var d = DestDip(CurrentPage);
         return new Point((screen.X - d.X) / d.Height, (screen.Y - d.Y) / d.Height);
     }
 
-    private Matrix PageToScreen(int page)
+    private Matrix PageToScreen(Page page)
     {
         var d = DestDip(page);
         return Matrix.CreateScale(d.Height, d.Height) * Matrix.CreateTranslation(d.X, d.Y);
     }
 
-    // ───────────────────────────── PDF-Seiten ──────────────────────────────
+    // ───────────────────────────── Seiten-Bitmaps ─────────────────────────────
 
     protected override void OnSizeChanged(SizeChangedEventArgs e)
     {
@@ -437,38 +499,48 @@ public sealed class PresenterView : Control
     /// <summary>Aktuelle Seite sofort, Nachbarseiten vorausschauend rendern.</summary>
     private void RequestPages()
     {
-        if (_doc is null || Bounds.Width <= 0) return;
-        _targetSize = DestPixels(_page).Size;
-        foreach (var p in new[] { _page, _page + 1, _page - 1 })
-            if (p >= 0 && p < _doc.PageCount) RequestPage(p);
+        if (_deck is null || Bounds.Width <= 0) return;
+        var pages = _deck.Pages;
+        _targetSize = DestPixels(pages[_page]).Size;
+        foreach (var i in new[] { _page, _page + 1, _page - 1 })
+            if (i >= 0 && i < pages.Count) RequestPage(pages[i]);
 
         // Cache klein halten: nur Seiten in der Nähe behalten
-        foreach (var p in _pageBitmaps.Keys.Where(p => Math.Abs(p - _page) > 2 && p != _fromPage).ToList())
+        var keep = Enumerable.Range(_page - 2, 5).Where(i => i >= 0 && i < pages.Count).Select(i => pages[i]).ToHashSet();
+        if (_fromPage is not null) keep.Add(_fromPage);
+        foreach (var p in _pageBitmaps.Keys.Where(p => !keep.Contains(p)).ToList())
         {
             _pageBitmaps[p].Dispose();
             _pageBitmaps.Remove(p);
         }
-        foreach (var p in _inkLayers.Keys.Where(p => p != _page && p != _fromPage).ToList())
+        foreach (var p in _inkLayers.Keys.Where(p => p != pages[_page] && p != _fromPage).ToList())
         {
             _inkLayers[p].Dispose();
             _inkLayers.Remove(p);
         }
     }
 
-    private async void RequestPage(int page)
+    private async void RequestPage(Page page)
     {
-        var doc = _doc!;
+        var deck = _deck!;
         var size = DestPixels(page).Size;
         if (_pageBitmaps.TryGetValue(page, out var existing) && existing.PixelSize == size) return;
         if (!_inFlight.Add((page, size))) return;
         try
         {
-            // Auftrag verwerfen, falls sich die Zielgröße inzwischen geändert hat.
-            var bmp = await doc.RenderAsync(page, size, () => size == _targetSize || Math.Abs(page - _page) <= 1);
-            if (bmp is null || doc != _doc) { bmp?.Dispose(); return; }
+            Bitmap? bmp = page switch
+            {
+                // Papier ist schnell gezeichnet → direkt auf dem UI-Thread
+                PaperPage paper => PaperRenderer.Render(paper.Paper, size),
+                // Auftrag verwerfen, falls sich die Zielgröße inzwischen geändert hat.
+                PdfPage pdf => await deck.Pdf!.RenderAsync(pdf.PdfIndex, size,
+                    () => size == _targetSize || IsNearCurrent(deck, page)),
+                _ => null,
+            };
+            if (bmp is null || deck != _deck || !deck.Pages.Contains(page)) { bmp?.Dispose(); return; }
             if (_pageBitmaps.Remove(page, out var old)) old.Dispose();
             _pageBitmaps[page] = bmp;
-            if (_fadePending && page == _page) StartFade();
+            if (_fadePending && page == CurrentPage) StartFade();
             InvalidateVisual();
         }
         catch (Exception ex)
@@ -481,21 +553,28 @@ public sealed class PresenterView : Control
         }
     }
 
+    private bool IsNearCurrent(Deck deck, Page page)
+    {
+        int i = deck.Pages.IndexOf(page);
+        return i >= 0 && Math.Abs(i - _page) <= 1;
+    }
+
     private void ClearInkLayers()
     {
         foreach (var l in _inkLayers.Values) l.Dispose();
         _inkLayers.Clear();
     }
 
-    private void InvalidateInkLayer(int page)
+    private void InvalidateInkLayer(Page page)
     {
         if (_inkLayers.Remove(page, out var l)) l.Dispose();
         InvalidateVisual();
     }
 
-    private RenderTargetBitmap? InkLayer(int page)
+    private RenderTargetBitmap? InkLayer(Page page)
     {
-        if (!_ink.TryGetValue(page, out var strokes) || strokes.Count == 0) return null;
+        var strokes = page.Strokes;
+        if (strokes.Count == 0) return null;
         var size = DestPixels(page).Size;
         if (_inkLayers.TryGetValue(page, out var layer) && layer.PixelSize == size) return layer;
         layer?.Dispose();
@@ -524,7 +603,7 @@ public sealed class PresenterView : Control
     private void OnFrame(TimeSpan _)
     {
         InvalidateVisual();
-        bool keepGoing = _continuous || _fromPage >= 0;
+        bool keepGoing = _continuous || _fromPage is not null;
         var top = TopLevel.GetTopLevel(this);
         if (keepGoing && top is not null) top.RequestAnimationFrame(OnFrame);
         else _frameLoopRunning = false;
@@ -551,38 +630,39 @@ public sealed class PresenterView : Control
 
         ctx.FillRectangle(Brushes.Black, new Rect(Bounds.Size));
 
-        if (_doc is null)
+        if (_deck is null)
         {
-            DrawText(ctx, _error ?? "PDF per Drag & Drop, Strg+O oder als Argument öffnen.", new Point(40, 40), 22);
+            DrawText(ctx, _error ?? "PDF öffnen (Strg+O, Drag & Drop) oder neues Blatt (Strg+N).", new Point(40, 40), 22);
             return;
         }
 
+        var current = _deck.Pages[_page];
         var fade = FadeProgress(now);
-        if (fade is { } t && _fromPage >= 0)
+        if (fade is { } t && _fromPage is { } from)
         {
-            DrawPage(ctx, _fromPage);
-            using (ctx.PushOpacity(t)) DrawPage(ctx, _page);
-            if (_fromPage >= 0) EnsureFrameLoop();
+            DrawPage(ctx, from);
+            using (ctx.PushOpacity(t)) DrawPage(ctx, current);
+            EnsureFrameLoop();
         }
         else
         {
-            DrawPage(ctx, _page);
+            DrawPage(ctx, current);
         }
 
         if (_active is not null)
         {
-            using (ctx.PushClip(DestDip(_page))) _active.Draw(ctx, PageToScreen(_page));
+            using (ctx.PushClip(DestDip(current))) _active.Draw(ctx, PageToScreen(current));
         }
         if (_eraserPos is { } ep && (_erasing || _tool == Tool.Eraser))
         {
-            double r = EraserRadius * DestDip(_page).Height;
+            double r = EraserRadius * DestDip(current).Height;
             ctx.DrawEllipse(null, new Pen(Brushes.Gray, 1), ep, r, r);
         }
 
         if (_showHud) DrawHud(ctx, now);
     }
 
-    private void DrawPage(DrawingContext ctx, int page)
+    private void DrawPage(DrawingContext ctx, Page page)
     {
         var dest = DestDip(page);
         if (_pageBitmaps.TryGetValue(page, out var bmp))
@@ -596,13 +676,13 @@ public sealed class PresenterView : Control
 
     private void DrawHud(DrawingContext ctx, double now)
     {
-        var px = DestPixels(_page);
+        var px = DestPixels(CurrentPage);
         string tool = _tool == Tool.Eraser
             ? "Radierer"
             : string.Create(CultureInfo.InvariantCulture, $"{(Pen.Highlighter ? "Textmarker" : "Stift")} {Pen.Color} {Pen.Width:0} px");
         var inv = CultureInfo.InvariantCulture;
         string text = string.Join('\n',
-            $"Seite {_page + 1}/{_doc!.PageCount} · {tool} · Überblendung {_fadeMs} ms · Touch zeichnet: {(_touchDraws ? "ja" : "nein")}",
+            $"Seite {_page + 1}/{_deck!.Pages.Count}{(CurrentPage is PaperPage pp ? $" ({pp.Paper.Describe()})" : "")} · {tool} · Überblendung {_fadeMs} ms · Touch zeichnet: {(_touchDraws ? "ja" : "nein")}",
             string.Format(inv, "Frame Ø {0:F1} ms · max {1:F1} ms · {2:F0} fps {3}",
                 _frameTimes.Average(now), _frameTimes.Max(now), _frameTimes.Count(now),
                 _continuous ? "(kontinuierlich)" : "(nur während Überblendung gemessen)"),

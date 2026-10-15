@@ -18,11 +18,13 @@ public sealed class CompactBar : Border
     private readonly StackPanel _presets = new() { Orientation = Orientation.Horizontal, Spacing = 4 };
     private readonly ToggleButton _eraser = MakeToggle("Radierer");
     private readonly Button _settings = new() { Content = "⚙ Stift…", Focusable = false, Padding = new Thickness(10, 4) };
+    private readonly Button _addPage = new() { Content = "＋ Seite", Focusable = false, Padding = new Thickness(10, 4) };
     private readonly TextBlock _status = new() { VerticalAlignment = VerticalAlignment.Center, Opacity = 0.7, FontSize = 12 };
 
     public event Action<int>? PresetClicked;
     public event Action? EraserClicked;
     public event Action? SettingsClicked;
+    public event Action? AddPageClicked;
 
     public CompactBar()
     {
@@ -34,8 +36,10 @@ public sealed class CompactBar : Border
 
         _eraser.Click += (_, _) => EraserClicked?.Invoke();
         _settings.Click += (_, _) => SettingsClicked?.Invoke();
+        _addPage.Click += (_, _) => AddPageClicked?.Invoke();
+        ToolTip.SetTip(_addPage, "Leeres Blatt nach der aktuellen Seite einfügen");
 
-        var right = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, Children = { _status } };
+        var right = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, Children = { _addPage, _status } };
         DockPanel.SetDock(right, Dock.Right);
         var left = new StackPanel
         {

@@ -24,6 +24,7 @@ public sealed class MainWindow : Window
         Opacity = 0.8,
     };
     private CancellationTokenSource? _noticeTimer;
+    private readonly AppSettings _settings = AppSettings.Load();
     private bool _closeConfirmed;
     private WindowState _stateBeforeFullscreen = WindowState.Normal;
 
@@ -58,6 +59,8 @@ public sealed class MainWindow : Window
         DockPanel.SetDock(_header, Dock.Top);
         Content = new DockPanel { Children = { _header, new Panel { Children = { _view, _picker } } } };
         _view.Notice += ShowNotice;
+        _view.DefaultPaper = _settings.Paper;
+        _bar.AddPageClicked += () => _view.InsertPaperPage();
 
         Title = _view.Title;
         _view.StatusChanged += () =>
@@ -80,11 +83,11 @@ public sealed class MainWindow : Window
             Closing += OnClosingAsync;
             _view.Focus();
             if (options.PdfPath is { } path) await _view.OpenAsync(path);
-            if (options.ExportTo is { } target && _view.Document is { } doc)
+            if (options.ExportTo is { } target && _view.Deck is { } deck)
             {
                 try
                 {
-                    await doc.ExportAsync(target, _view.Ink);
+                    await PdfExporter.ExportAsync(deck, target);
                     Console.WriteLine($"Exportiert: {target}");
                 }
                 catch (Exception ex)
@@ -130,13 +133,15 @@ public sealed class MainWindow : Window
                     Header = "_Datei",
                     Items =
                     {
-                        Item("PDF _öffnen …", "Ctrl+O", async () => await OpenWithDialog()),
-                        Item("Annotationen _speichern", "Ctrl+S", () => SaveAnnotations()),
+                        Item("_Neues Blatt", "Ctrl+N", async () => await NewBlankAsync()),
+                        Item("_Öffnen …", "Ctrl+O", async () => await OpenWithDialog()),
+                        Item("_Speichern", "Ctrl+S", async () => await SaveAsync()),
                         Item("Als PDF _exportieren …", "Ctrl+E", async () => await ExportPdf()),
                         new Separator(),
                         Item("_Beenden", "Ctrl+Q", Close),
                     },
                 },
+                BuildPageMenu(),
                 new MenuItem
                 {
                     Header = "_Ansicht",
@@ -168,15 +173,115 @@ public sealed class MainWindow : Window
         if (_options.Canvas is { } canvas && WindowState != WindowState.FullScreen) SizeForCanvas(canvas);
     }
 
-    /// <summary>Speichert in die Begleitdatei neben dem PDF. Liefert false bei Fehler.</summary>
-    private bool SaveAnnotations()
+    /// <summary>
+    /// Menü „Seite“: Blatt einfügen/löschen, Hintergrund, Abstand und Format. Die Auswahl gilt für
+    /// die aktuelle Papierseite und als Vorgabe für neue Blätter.
+    /// </summary>
+    private MenuItem BuildPageMenu()
     {
-        if (_view.CurrentPath is not { } pdf) return false;
+        var menu = new MenuItem { Header = "_Seite" };
+        var insert = new MenuItem { Header = "Leeres Blatt _einfügen", InputGesture = KeyGesture.Parse("Ctrl+Shift+N") };
+        insert.Click += (_, _) => _view.InsertPaperPage();
+        var delete = new MenuItem { Header = "Seite _löschen" };
+        delete.Click += async (_, _) => await DeletePageAsync();
+
+        var radios = new List<(MenuItem Item, Func<Paper, bool> IsChecked)>();
+        MenuItem Radio(string header, string group, Func<Paper, Paper> apply, Func<Paper, bool> isChecked)
+        {
+            var item = new MenuItem { Header = header, ToggleType = MenuItemToggleType.Radio, GroupName = group };
+            item.Click += (_, _) => ApplyPaper(apply(CurrentPaper()));
+            radios.Add((item, isChecked));
+            return item;
+        }
+        MenuItem Sub(string header, params MenuItem[] items)
+        {
+            var sub = new MenuItem { Header = header };
+            foreach (var i in items) sub.Items.Add(i);
+            return sub;
+        }
+
+        var styles = new[] { (PaperStyle.Blank, "Blanko"), (PaperStyle.Grid, "Kariert"), (PaperStyle.Lined, "Liniert"), (PaperStyle.Dotted, "Punktiert") }
+            .Select(t => Radio(t.Item2, "style",
+                p => p with { Style = t.Item1, SpacingMm = p.Style == t.Item1 ? p.SpacingMm : Paper.DefaultSpacing(t.Item1) },
+                p => p.Style == t.Item1))
+            .ToArray();
+        var spacings = new[] { 4.0, 5, 6, 8, 10 }
+            .Select(mm => Radio($"{mm:0} mm", "spacing", p => p with { SpacingMm = mm }, p => Math.Abs(p.SpacingMm - mm) < 0.01))
+            .ToArray();
+        var formats = new[] { (PageFormat.Wide16x9, "16:9 (Folie)"), (PageFormat.A4Portrait, "A4 hoch"), (PageFormat.A4Landscape, "A4 quer") }
+            .Select(t => Radio(t.Item2, "format", p => p with { Format = t.Item1 }, p => p.Format == t.Item1))
+            .ToArray();
+
+        menu.Items.Add(insert);
+        menu.Items.Add(delete);
+        menu.Items.Add(new Separator());
+        menu.Items.Add(Sub("_Hintergrund", styles));
+        menu.Items.Add(Sub("_Abstand", spacings));
+        menu.Items.Add(Sub("_Format", formats));
+        // Häkchen beim Öffnen an die aktuelle Seite bzw. Vorgabe anpassen
+        menu.SubmenuOpened += (_, _) =>
+        {
+            var paper = CurrentPaper();
+            foreach (var (item, isChecked) in radios) item.IsChecked = isChecked(paper);
+            delete.IsEnabled = _view.Deck is { Pages.Count: > 1 };
+        };
+        return menu;
+    }
+
+    private Paper CurrentPaper() => _view.CurrentPage is PaperPage p ? p.Paper : _view.DefaultPaper;
+
+    private void ApplyPaper(Paper paper)
+    {
+        _settings.Paper = paper;
+        _settings.Save();
+        if (_view.CurrentPage is PaperPage) _view.SetCurrentPaper(paper);
+        else
+        {
+            _view.DefaultPaper = paper;
+            ShowNotice($"Neue Blätter: {paper.Describe()}");
+        }
+    }
+
+    private async Task NewBlankAsync()
+    {
+        if (!await ConfirmDiscardAsync()) return;
+        _view.NewBlank(_settings.Paper);
+    }
+
+    private async Task DeletePageAsync()
+    {
+        if (_view.CurrentPage is not { } page) return;
+        if (page.Strokes.Count > 0 &&
+            await ConfirmDialog.AskYesNoAsync(this, "Diese Seite enthält Annotationen. Trotzdem löschen?") != true)
+            return;
+        if (!_view.DeleteCurrentPage()) ShowNotice("Die letzte Seite kann nicht gelöscht werden.");
+        else if (page is PdfPage) ShowNotice("Seite aus der Präsentation entfernt (das PDF selbst bleibt unverändert).");
+    }
+
+    /// <summary>
+    /// Speichert das Dokument: mit PDF in die Begleitdatei, ohne PDF als .pdfp (beim ersten Mal
+    /// mit Dateiauswahl). Liefert false bei Fehler oder Abbruch.
+    /// </summary>
+    private async Task<bool> SaveAsync()
+    {
+        if (_view.Deck is not { } deck) return false;
+        if (deck.PdfPath is null && deck.FilePath is null)
+        {
+            var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = "Tafel speichern",
+                SuggestedFileName = "Tafel" + DocumentFile.Extension,
+                DefaultExtension = DocumentFile.Extension.TrimStart('.'),
+                FileTypeChoices = [new FilePickerFileType("PDF-Presenter-Tafel") { Patterns = ["*" + DocumentFile.Extension] }],
+            });
+            if (file?.TryGetLocalPath() is not { } path) return false;
+            deck.FilePath = path;
+        }
         try
         {
-            AnnotationFile.Save(pdf, _view.Ink);
+            var written = DocumentFile.Save(deck);
             _view.MarkSaved();
-            ShowNotice($"Gespeichert: {Path.GetFileName(AnnotationFile.PathFor(pdf))}");
+            ShowNotice($"Gespeichert: {Path.GetFileName(written)}");
             return true;
         }
         catch (Exception ex)
@@ -188,25 +293,27 @@ public sealed class MainWindow : Window
 
     private async Task ExportPdf()
     {
-        if (_view.CurrentPath is not { } pdf || _view.Document is not { } doc) return;
-        var folder = await StorageProvider.TryGetFolderFromPathAsync(Path.GetDirectoryName(pdf)!);
+        if (_view.Deck is not { } deck) return;
+        var source = deck.PdfPath ?? deck.FilePath;
+        var folder = source is null ? null : await StorageProvider.TryGetFolderFromPathAsync(Path.GetDirectoryName(source)!);
+        var baseName = source is null ? "Tafel" : Path.GetFileNameWithoutExtension(source);
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = "Als PDF exportieren",
-            SuggestedFileName = Path.GetFileNameWithoutExtension(pdf) + "-annotiert.pdf",
+            SuggestedFileName = baseName + (deck.Pdf is null ? ".pdf" : "-annotiert.pdf"),
             SuggestedStartLocation = folder,
             DefaultExtension = "pdf",
             FileTypeChoices = [new FilePickerFileType("PDF") { Patterns = ["*.pdf"] }],
         });
         if (file?.TryGetLocalPath() is not { } target) return;
-        if (Path.GetFullPath(target) == Path.GetFullPath(pdf))
+        if (deck.PdfPath is { } pdf && Path.GetFullPath(target) == Path.GetFullPath(pdf))
         {
             ShowNotice("Bitte nicht über das geöffnete PDF exportieren.");
             return;
         }
         try
         {
-            await doc.ExportAsync(target, _view.Ink);
+            await PdfExporter.ExportAsync(deck, target);
             ShowNotice($"Exportiert: {Path.GetFileName(target)}");
         }
         catch (Exception ex)
@@ -220,10 +327,10 @@ public sealed class MainWindow : Window
     {
         if (!_view.IsDirty) return true;
         var choice = await ConfirmDialog.AskAsync(this,
-            $"Die Annotationen in „{Path.GetFileName(_view.CurrentPath)}“ wurden geändert. Speichern?");
+            $"„{_view.Deck?.Name}“ wurde geändert. Speichern?");
         return choice switch
         {
-            SaveChoice.Save => SaveAnnotations(),
+            SaveChoice.Save => await SaveAsync(),
             SaveChoice.Discard => true,
             _ => false,
         };
@@ -280,7 +387,13 @@ public sealed class MainWindow : Window
                 ToggleHeader();
                 break;
             case Key.S when ctrl:
-                SaveAnnotations();
+                await SaveAsync();
+                break;
+            case Key.N when ctrl && e.KeyModifiers.HasFlag(KeyModifiers.Shift):
+                _view.InsertPaperPage();
+                break;
+            case Key.N when ctrl:
+                await NewBlankAsync();
                 break;
             case Key.E when ctrl:
                 await ExportPdf();
@@ -325,9 +438,14 @@ public sealed class MainWindow : Window
         if (!await ConfirmDiscardAsync()) return;
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "PDF öffnen",
+            Title = "Öffnen",
             AllowMultiple = false,
-            FileTypeFilter = [new FilePickerFileType("PDF") { Patterns = ["*.pdf"] }],
+            FileTypeFilter =
+            [
+                new FilePickerFileType("PDF oder Tafel") { Patterns = ["*.pdf", "*" + DocumentFile.Extension] },
+                new FilePickerFileType("PDF") { Patterns = ["*.pdf"] },
+                new FilePickerFileType("PDF-Presenter-Tafel") { Patterns = ["*" + DocumentFile.Extension] },
+            ],
         });
         if (files.Count > 0 && files[0].TryGetLocalPath() is { } path) await _view.OpenAsync(path);
     }
