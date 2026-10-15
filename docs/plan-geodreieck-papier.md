@@ -45,7 +45,7 @@ Raster; Export als Ausschnitt um den Inhalt. Gestenkonflikt mit dem Geodreieck k
 - Winkelanzeige beim Drehen, Einrasten bei 0°/45°/90° (±2°, abschaltbar).
 - Ein-/Ausblenden: Taste G und Knopf in der Kompaktleiste. Der Stift bewegt es nie.
 
-## Phase 3 – Geodreieck als Werkzeug ✅ (ohne „Winkel antragen“)
+## Phase 3 – Geodreieck als Werkzeug ✅
 
 - Lineal-Funktion: Stift nahe einer Kante → Strich wird exakt an der Kante geführt.
 - Skala in echten Zentimetern der Seite (passt auf Karopapier: 1 cm = 2 Kästchen).

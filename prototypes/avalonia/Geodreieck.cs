@@ -149,6 +149,28 @@ public readonly record struct RulerGuide(Point A, Vector Dir, Vector Normal, dou
     public double Millimetres(double from, double to) => Math.Abs(to - from) / UnitsPerMm;
 }
 
+/// <summary>
+/// Winkel antragen: Strahl vom Nullpunkt (Mitte der Hypotenuse). Richtung rastet auf ganze Grad
+/// ein (Außenskala: 0° rechts an der Hypotenuse, gegen den Uhrzeigersinn), Länge auf ganze mm.
+/// </summary>
+public readonly record struct AngleGuide(Point Center, double RotationDeg, double UnitsPerMm)
+{
+    public static AngleGuide From(GeoPose pose, double pageUnitsPerMm) =>
+        new(pose.Center, pose.AngleDeg, pageUnitsPerMm * pose.Scale);
+
+    /// <summary>Endpunkt (Seiteneinheiten), Winkel in Grad (−180…180) und Länge in mm für die Stiftposition.</summary>
+    public (Point End, double AngleDeg, double LengthMm) Resolve(Point pagePoint)
+    {
+        var local = GeoMath.Rotate(pagePoint - Center, -RotationDeg);
+        double angle = Math.Round(Math.Atan2(-local.Y, local.X) * 180 / Math.PI);
+        if (angle <= -180) angle += 360;
+        double mm = Math.Round(Math.Sqrt(local.X * local.X + local.Y * local.Y) / UnitsPerMm);
+        double a = angle * Math.PI / 180;
+        var endLocal = new Vector(Math.Cos(a), -Math.Sin(a)) * (mm * UnitsPerMm);
+        return (Center + GeoMath.Rotate(endLocal, RotationDeg), angle, mm);
+    }
+}
+
 /// <summary>Zeichnet das Geodreieck (Vektor, jeden Frame; Geometrie wird zwischengespeichert).</summary>
 public static class GeoRenderer
 {
@@ -189,6 +211,9 @@ public static class GeoRenderer
                 DrawLabel(ctx, deg.ToString(CultureInfo.InvariantCulture), Polar(44, deg), 2.6, mmToScreen);
                 DrawLabel(ctx, (180 - deg).ToString(CultureInfo.InvariantCulture), Polar(37.5, deg), 2.1, mmToScreen);
             }
+
+            // Nullpunkt: Ansatzstelle für „Winkel antragen“
+            ctx.DrawEllipse(null, new Pen(InkBrush, Math.Max(0.3, 1 / mmToScreen)), default, 1.6, 1.6);
 
             DrawLock(ctx, scaleLocked, mmToScreen);
         }

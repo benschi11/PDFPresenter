@@ -62,6 +62,9 @@ public sealed class PresenterView : Control
     // Lineal-Führung des aktiven Strichs (Stift setzt an einer Kante an)
     private RulerGuide? _ruler;
     private double _rulerStart;
+    // Winkel antragen: Strahl vom Nullpunkt des Geodreiecks
+    private AngleGuide? _angleGuide;
+    private (double AngleDeg, double LengthMm) _angleReading;
 
     // Messwerte
     private bool _showHud = true;
@@ -100,6 +103,9 @@ public sealed class PresenterView : Control
 
     /// <summary>Stift wird an den Kanten des Geodreiecks geführt (gerade Linien, exakte Längen).</summary>
     public bool GeoRuler { get; set { field = value; StatusChanged?.Invoke(); } } = true;
+
+    /// <summary>Am Nullpunkt angesetzt → Strahl mit ganzzahligem Winkel (Winkel antragen).</summary>
+    public bool GeoAngleTool { get; set { field = value; StatusChanged?.Invoke(); } } = true;
 
     /// <summary>Beim Drehen bei 0°/45°/90° … einrasten.</summary>
     public bool GeoSnap { get; set { field = value; StatusChanged?.Invoke(); } } = true;
@@ -479,6 +485,17 @@ public sealed class PresenterView : Control
         if (_active is null || _deck is null) return;
         var p = ScreenToPage(pt.Position);
         float pressure = pt.Pointer.Type == PointerType.Mouse ? 0.5f : pt.Properties.Pressure;
+        if (_angleGuide is { } ag)
+        {
+            // Winkel antragen: Strahl vom Nullpunkt in eingerasteter Richtung und Länge
+            float pr = Math.Max(pressure, _active.Points.Count > 0 ? _active.Points[0].Pressure : 0);
+            var (end, angle, mm) = ag.Resolve(p);
+            _angleReading = (angle, mm);
+            _active.Points.Clear();
+            _active.Points.Add(new InkPoint(ag.Center.X, ag.Center.Y, pr));
+            if (mm > 0) _active.Points.Add(new InkPoint(end.X, end.Y, pr));
+            return;
+        }
         if (_ruler is { } guide)
         {
             // Am Lineal: nur Anfangs- und Endpunkt, beide auf der Kante (knapp außen anliegend)
@@ -505,6 +522,7 @@ public sealed class PresenterView : Control
         var stroke = _active;
         _active = null;
         _ruler = null;
+        _angleGuide = null;
         _activePointerId = null;
         _erasing = false;
         if (stroke is null || stroke.Points.Count == 0 || CurrentPage is not { } page) return;
@@ -597,13 +615,33 @@ public sealed class PresenterView : Control
     private bool GeoHit(Point screen, double marginMm = 3) =>
         _geoVisible && ScreenToGeo(screen) is { } local && GeoMath.Contains(local, marginMm);
 
+    /// <summary>Nullpunkt (Winkel antragen) oder Kantenband (Lineal) – dort zeichnet auch die Maus.</summary>
+    private bool IsDrawZone(Point screen)
+    {
+        if (!_geoVisible || CurrentPage is not { } page) return false;
+        var p = ScreenToPage(screen);
+        double dipPerUnit = DestDip(page).Height;
+        if (GeoAngleTool && Distance(p, _geo.Center) * dipPerUnit <= 12) return true;
+        return GeoRuler && GeoMath.FindGuide(_geo, PageUnitsPerMm(page), p, 10 / dipPerUnit) is not null;
+    }
+
     /// <summary>Setzt der Stift an einer Kante an (≤ 10 px), wird der Strich daran geführt.</summary>
     private void StartRuler(Point screen)
     {
         _ruler = null;
-        if (!_geoVisible || !GeoRuler || CurrentPage is not { } page) return;
-        double maxDistance = 10 / DestDip(page).Height; // 10 DIP in Seiteneinheiten
+        _angleGuide = null;
+        if (!_geoVisible || CurrentPage is not { } page) return;
         var p = ScreenToPage(screen);
+        // Nullpunkt hat Vorrang (liegt auf der Hypotenuse): ≤ 12 DIP → Winkel antragen
+        double toCenter = Distance(p, _geo.Center) * DestDip(page).Height;
+        if (GeoAngleTool && toCenter <= 12)
+        {
+            _angleGuide = AngleGuide.From(_geo, PageUnitsPerMm(page));
+            _angleReading = (0, 0);
+            return;
+        }
+        if (!GeoRuler) return;
+        double maxDistance = 10 / DestDip(page).Height; // 10 DIP in Seiteneinheiten
         if (GeoMath.FindGuide(_geo, PageUnitsPerMm(page), p, maxDistance) is { } guide)
         {
             _ruler = guide;
@@ -632,6 +670,8 @@ public sealed class PresenterView : Control
 
         // Zweiter Finger darf irgendwo aufsetzen, sobald einer das Dreieck hält → Drehen
         bool secondFinger = type == PointerType.Touch && _geoPointers.Count == 1;
+        // Maus: am Nullpunkt und an den Kanten wird gezeichnet, nicht verschoben
+        if (type == PointerType.Mouse && IsDrawZone(pt.Position)) return false;
         if (!secondFinger && !GeoHit(pt.Position, type == PointerType.Mouse ? 0 : 3)) return false;
         if (_geoPointers.Count >= 2) return true; // weitere Finger schlucken
 
@@ -740,6 +780,41 @@ public sealed class PresenterView : Control
             ctx.DrawRectangle(new SolidColorBrush(Color.FromArgb(0xD0, 0x16, 0x3A, 0x5C)), null, box, 8, 8);
             ctx.DrawText(text, new Point(box.X + 10, box.Y + 4));
         }
+    }
+
+    /// <summary>Winkelbogen vom 0°-Strahl bis zur Linie und Etikett „37° (143°) · 4,2 cm“.</summary>
+    private void DrawAngleReading(DrawingContext ctx, Page page)
+    {
+        var (angle, mm) = _angleReading;
+        var toScreen = GeoToScreen(page);
+        const double r = 22; // mm
+        if (Math.Abs(angle) >= 1)
+        {
+            var geo = new StreamGeometry();
+            using (var g = geo.Open())
+            {
+                double a = angle * Math.PI / 180;
+                g.BeginFigure(new Point(r, 0), false);
+                g.ArcTo(new Point(r * Math.Cos(a), -r * Math.Sin(a)), new Size(r, r), 0, false,
+                    angle > 0 ? SweepDirection.CounterClockwise : SweepDirection.Clockwise);
+                g.EndFigure(false);
+            }
+            using (ctx.PushTransform(toScreen))
+                ctx.DrawGeometry(null, new Pen(new SolidColorBrush(Color.FromArgb(0xE0, 0xD6, 0x28, 0x28)), 0.6), geo);
+        }
+
+        var de = CultureInfo.GetCultureInfo("de-AT");
+        string text = angle >= 0
+            ? $"{angle:0}° ({180 - angle:0}°) · {(mm / 10).ToString("0.0", de)} cm"
+            : $"{angle:0}° · {(mm / 10).ToString("0.0", de)} cm";
+        var ft = MakeText(text, 18);
+        var end = _active!.Points[^1];
+        var dir = new Point(end.X, end.Y) - _geo.Center;
+        double len = Math.Sqrt(dir.X * dir.X + dir.Y * dir.Y);
+        var anchor = (new Point(end.X, end.Y) + (len > 0 ? dir / len : default) * (30 / DestDip(page).Height)).Transform(PageToScreen(page));
+        var box = new Rect(anchor.X - ft.Width / 2 - 8, anchor.Y - ft.Height / 2 - 3, ft.Width + 16, ft.Height + 6);
+        ctx.DrawRectangle(new SolidColorBrush(Color.FromArgb(0xD0, 0x16, 0x3A, 0x5C)), null, box, 6, 6);
+        ctx.DrawText(ft, new Point(box.X + 8, box.Y + 3));
     }
 
     /// <summary>Länge der am Lineal gezogenen Strecke neben dem Endpunkt („4,3 cm“).</summary>
@@ -930,6 +1005,7 @@ public sealed class PresenterView : Control
 
         if (_geoVisible) DrawGeo(ctx, current, now);
         if (_ruler is { } ruler && _active is { Points.Count: > 0 }) DrawRulerLength(ctx, ruler, current);
+        if (_angleGuide is not null && _active is { Points.Count: > 1 }) DrawAngleReading(ctx, current);
         if (_showHud) DrawHud(ctx, now);
     }
 
