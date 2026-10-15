@@ -51,7 +51,7 @@ Raster; Export als Ausschnitt um den Inhalt. Gestenkonflikt mit dem Geodreieck k
 - Skala in echten Zentimetern der Seite (passt auf Karopapier: 1 cm = 2 Kästchen).
 - Optional: Winkel antragen mit Live-Anzeige.
 
-## Phase 4 – Feinschliff
+## Phase 4 – Feinschliff ✅
 
 Position/Größe/Sichtbarkeit merken, Geodreieck wird nie gespeichert oder exportiert,
 optional Wischen zum Blättern.

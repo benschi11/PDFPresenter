@@ -65,6 +65,10 @@ public sealed class MainWindow : Window
         _view.GeoSnap = _settings.GeoSnap;
         _view.GeoRuler = _settings.GeoRuler;
         _view.GeoAngleTool = _settings.GeoAngleTool;
+        _view.SwipeToPage = _settings.SwipeToPage;
+        if (_settings.GeoPose is [var gx, var gy, var ga])
+            _view.RestoreGeo(new GeoPose(new Point(gx, gy), ga, _settings.GeoScale), _settings.GeoVisible);
+        _view.GeoPoseChanged += SaveGeoPose;
         _view.StatusChanged += SaveGeoSettings;
         _bar.GeoClicked += () => _view.GeoVisible = !_view.GeoVisible;
         _bar.AddPageClicked += () => _view.InsertPaperPage();
@@ -157,12 +161,26 @@ public sealed class MainWindow : Window
                         Item("Stift-Panel", "Tab", () => _picker.IsVisible = !_picker.IsVisible),
                         BuildGeoMenu(),
                         Item("Kopfbereich ein/aus", "F2", ToggleHeader),
+                        BuildSwipeItem(),
                         Item("Messanzeige", "F1", _view.ToggleHud),
                         Item("Vollbild", "F11", ToggleFullscreen),
                     },
                 },
             },
         };
+    }
+
+    private MenuItem BuildSwipeItem()
+    {
+        var item = new MenuItem { Header = "Wischen zum Blättern (1 Finger)", ToggleType = MenuItemToggleType.CheckBox };
+        // Häkchen beim Aufklappen aktualisieren (Menü entsteht vor dem Laden der Einstellungen)
+        item.AttachedToVisualTree += (_, _) => item.IsChecked = _view.SwipeToPage;
+        item.Click += (_, _) =>
+        {
+            _view.SwipeToPage = !_view.SwipeToPage;
+            item.IsChecked = _view.SwipeToPage;
+        };
+        return item;
     }
 
     private void ShowNotice(string text)
@@ -363,13 +381,24 @@ public sealed class MainWindow : Window
         double scale = Math.Round(_view.GeoScale, 3);
         if (scale == _settings.GeoScale && _view.GeoScaleLocked == _settings.GeoScaleLocked
             && _view.GeoSnap == _settings.GeoSnap && _view.GeoRuler == _settings.GeoRuler
-            && _view.GeoAngleTool == _settings.GeoAngleTool)
+            && _view.GeoAngleTool == _settings.GeoAngleTool && _view.SwipeToPage == _settings.SwipeToPage)
             return;
+        _settings.SwipeToPage = _view.SwipeToPage;
         _settings.GeoAngleTool = _view.GeoAngleTool;
         _settings.GeoRuler = _view.GeoRuler;
         _settings.GeoScale = scale;
         _settings.GeoScaleLocked = _view.GeoScaleLocked;
         _settings.GeoSnap = _view.GeoSnap;
+        _settings.Save();
+    }
+
+    /// <summary>Lage und Sichtbarkeit des Geodreiecks merken (nach jeder abgeschlossenen Geste).</summary>
+    private void SaveGeoPose()
+    {
+        _settings.GeoVisible = _view.GeoVisible;
+        if (_view.GeoPlacement is { } p)
+            _settings.GeoPose = [Math.Round(p.Center.X, 5), Math.Round(p.Center.Y, 5), Math.Round(p.AngleDeg, 3)];
+        _settings.GeoScale = Math.Round(_view.GeoScale, 3);
         _settings.Save();
     }
 

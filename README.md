@@ -75,8 +75,13 @@ Geodreieck (Taste G, Knopf „Geodreieck“ in der Stiftleiste, Ansicht → Geod
   Strahl vom Nullpunkt, Richtung auf ganze Grad eingerastet (Außenskala, 0° rechts), Länge auf
   ganze mm. Winkelbogen und Etikett zeigen z. B. „37° (143°) · 5,6 cm“ (in Klammern die
   Innenskala). Abschaltbar unter Ansicht → Geodreieck → Winkel antragen.
-- Größe, Sperre, Einrasten, Lineal-Führung und Winkel antragen werden gemerkt; das Geodreieck selbst wird nicht
+- Lage, Drehung, Sichtbarkeit, Größe, Sperre, Einrasten, Lineal-Führung und Winkel antragen
+  werden gemerkt (auch über einen Neustart); das Geodreieck selbst wird nicht
   gespeichert oder exportiert (die damit gezogenen Linien natürlich schon).
+
+Wischen zum Blättern: mit **einem Finger** schnell waagrecht über die Folie wischen (nach
+links = nächste Seite). Nur wenn Finger nicht zeichnen, nicht auf dem Geodreieck, nicht mit zwei
+Fingern und nicht, solange der Stift in der Nähe ist (Handballen). Abschaltbar unter Ansicht.
 
 Speichern und Export:
 - **Speichern** – Dokument mit PDF: Begleitdatei `<datei>.pdf.annot.json` neben dem PDF

@@ -59,6 +59,9 @@ public sealed class PresenterView : Control
     private Point? _geoTapStart;
     private bool _geoTapMoved;
     private double _geoAngleUntilMs;
+    // Wischen zum Blättern (ein Finger, nicht zeichnend)
+    private (long Id, Point Start, double StartMs)? _swipe;
+    private bool _swipeCancelled;
     // Lineal-Führung des aktiven Strichs (Stift setzt an einer Kante an)
     private RulerGuide? _ruler;
     private double _rulerStart;
@@ -94,9 +97,29 @@ public sealed class PresenterView : Control
             _geoVisible = value;
             if (!value) EndGeoGesture();
             StatusChanged?.Invoke();
+            GeoPoseChanged?.Invoke();
             InvalidateVisual();
         }
     }
+
+    /// <summary>Lage des Geodreiecks hat sich (abschließend) geändert – zum Merken.</summary>
+    public event Action? GeoPoseChanged;
+
+    /// <summary>Aktuelle Lage (für die Einstellungen); null, solange noch nie platziert.</summary>
+    public GeoPose? GeoPlacement => _geoPlaced ? _geo : null;
+
+    /// <summary>Gemerkte Lage wiederherstellen (liegt sie außerhalb der Seite, wird neu platziert).</summary>
+    public void RestoreGeo(GeoPose pose, bool visible)
+    {
+        _geo = pose with { Scale = Math.Clamp(pose.Scale, GeoPose.MinScale, GeoPose.MaxScale) };
+        _geoPlaced = true;
+        _geoVisible = visible;
+        StatusChanged?.Invoke();
+        InvalidateVisual();
+    }
+
+    /// <summary>Mit einem Finger waagrecht wischen blättert (wenn Finger nicht zeichnen).</summary>
+    public bool SwipeToPage { get; set { field = value; StatusChanged?.Invoke(); } } = true;
 
     /// <summary>Größe gesperrt: Zwei-Finger-Geste dreht/verschiebt nur, skaliert nicht.</summary>
     public bool GeoScaleLocked { get; set { field = value; StatusChanged?.Invoke(); InvalidateVisual(); } } = true;
@@ -126,6 +149,7 @@ public sealed class PresenterView : Control
     {
         _geo = _geo with { AngleDeg = 0 };
         ShowGeoAngle();
+        GeoPoseChanged?.Invoke();
         InvalidateVisual();
     }
 
@@ -388,6 +412,8 @@ public sealed class PresenterView : Control
             return;
         }
 
+        if (e.Pointer.Type == PointerType.Touch) TrackSwipe(e.Pointer.Id, pt.Position, now);
+
         if (_deck is null || !Accept(e.Pointer.Type, now)) return;
 
         // Stift setzt auf, während ein Finger-/Handballenstrich läuft → den verwerfen.
@@ -454,6 +480,18 @@ public sealed class PresenterView : Control
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
         base.OnPointerReleased(e);
+        if (_swipe is { } sw && sw.Id == e.Pointer.Id)
+        {
+            _swipe = null;
+            if (!_swipeCancelled && SwipeToPage && !_touchDraws)
+            {
+                switch (Swipe.Detect(sw.Start, e.GetPosition(this), _clock.Elapsed.TotalMilliseconds - sw.StartMs))
+                {
+                    case 1: Next(); break;
+                    case -1: Previous(); break;
+                }
+            }
+        }
         if (EndGeoPointer(e.Pointer.Id, e.GetPosition(this)))
         {
             e.Pointer.Capture(null);
@@ -720,7 +758,11 @@ public sealed class PresenterView : Control
         if (_geoTapStart is { } start && !_geoTapMoved && _geoPointers.Count == 0
             && ScreenToGeo(start) is { } local && Distance(local, GeoRenderer.LockCenterMm) <= GeoRenderer.LockRadiusMm)
             GeoScaleLocked = !GeoScaleLocked;
-        if (_geoPointers.Count == 0) _geoTapStart = null;
+        if (_geoPointers.Count == 0)
+        {
+            _geoTapStart = null;
+            GeoPoseChanged?.Invoke();
+        }
         _geoRawAngle = _geo.AngleDeg;
         InvalidateVisual();
         return true;
@@ -731,7 +773,19 @@ public sealed class PresenterView : Control
         if (_geoPointers.Count == 0) return;
         _geoPointers.Clear();
         _geoTapStart = null;
+        GeoPoseChanged?.Invoke();
         InvalidateVisual();
+    }
+
+    /// <summary>
+    /// Merkt sich den ersten Finger für eine mögliche Wischgeste. Ein zweiter Finger, ein Finger
+    /// auf dem Geodreieck oder ein Stift in der Nähe (Handballen) verhindern das Blättern.
+    /// </summary>
+    private void TrackSwipe(long id, Point position, double now)
+    {
+        if (_swipe is not null) { _swipeCancelled = true; return; }
+        _swipeCancelled = now - _lastPenSeenMs <= PalmRejectMs;
+        _swipe = (id, position, now);
     }
 
     private void ShowGeoAngle()
@@ -760,6 +814,7 @@ public sealed class PresenterView : Control
             GeoScale = GeoScale * (delta > 0 ? 1.05 : 1 / 1.05);
         }
         else return;
+        GeoPoseChanged?.Invoke();
         InvalidateVisual();
         e.Handled = true;
     }

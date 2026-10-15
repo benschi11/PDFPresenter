@@ -25,6 +25,21 @@ public readonly record struct GeoPose(Point Center, double AngleDeg, double Scal
     }
 }
 
+/// <summary>Erkennt ein schnelles waagrechtes Wischen mit einem Finger (Blättern).</summary>
+public static class Swipe
+{
+    public const double MinDistance = 120;   // DIP
+    public const double MaxDurationMs = 600;
+
+    /// <summary>+1 = nächste Seite (nach links gewischt), −1 = vorige, 0 = kein Wischen.</summary>
+    public static int Detect(Point start, Point end, double durationMs)
+    {
+        double dx = end.X - start.X, dy = end.Y - start.Y;
+        if (durationMs > MaxDurationMs || Math.Abs(dx) < MinDistance || Math.Abs(dy) > Math.Abs(dx) * 0.5) return 0;
+        return dx < 0 ? 1 : -1;
+    }
+}
+
 /// <summary>Reine Geometrie und Gestenrechnung (ohne UI, unit-getestet).</summary>
 public static class GeoMath
 {

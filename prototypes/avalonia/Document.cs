@@ -103,6 +103,10 @@ public sealed class AppSettings
     public bool GeoSnap { get; set; } = true;
     public bool GeoRuler { get; set; } = true;
     public bool GeoAngleTool { get; set; } = true;
+    public bool GeoVisible { get; set; }
+    /// <summary>Lage des Geodreiecks (Seiteneinheiten, Grad); null = noch nie platziert.</summary>
+    public double[]? GeoPose { get; set; }
+    public bool SwipeToPage { get; set; } = true;
 
     private static string FilePath => System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PDFPresenter", "app-settings.json");
