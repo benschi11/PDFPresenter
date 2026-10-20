@@ -174,7 +174,19 @@ public sealed class PdfDocument : IDisposable
 /// </summary>
 public static class PdfExporter
 {
-    private sealed record Item(int? PdfIndex, Paper? Paper, List<Stroke> Strokes);
+    private sealed record Item(int? PdfIndex, Paper? Paper, List<Stroke> Strokes, Rect? CanvasArea = null);
+
+    /// <summary>Exportbereich einer Leinwand: Inhalt plus 1 cm Rand, leer → aktueller Ausschnitt.</summary>
+    public static Rect CanvasArea(PaperPage page)
+    {
+        double margin = 10 * Paper.PtPerMm / Paper.FrameHeightPt;
+        if (page.Strokes.Count == 0)
+        {
+            var v = page.View;
+            return new Rect(v.Offset.X, v.Offset.Y, page.SizePt.Width / page.SizePt.Height / v.Zoom, 1 / v.Zoom);
+        }
+        return page.Strokes.Select(s => s.Bounds).Aggregate((a, b) => a.Union(b)).Inflate(margin);
+    }
 
     [ThreadStatic] private static Stream? _stream;
 
@@ -184,6 +196,7 @@ public static class PdfExporter
         var items = deck.Pages.Select(p => p switch
         {
             PdfPage pp => new Item(pp.PdfIndex, null, p.Strokes.ToList()),
+            PaperPage { Paper.IsInfinite: true } pa => CanvasItem(pa),
             PaperPage pa => new Item(null, pa.Paper, p.Strokes.ToList()),
             _ => throw new NotSupportedException(p.GetType().Name),
         }).ToList();
@@ -199,12 +212,15 @@ public static class PdfExporter
                     var item = items[i];
                     if (item.PdfIndex is { } index)
                         Import(doc, source!, index, i);
+                    else if (item.CanvasArea is { } area)
+                        Native.FPDF_ClosePage(Native.FPDFPage_New(doc, i, area.Width * Paper.FrameHeightPt, area.Height * Paper.FrameHeightPt));
                     else
                         Native.FPDF_ClosePage(Native.FPDFPage_New(doc, i, item.Paper!.SizePt.Width, item.Paper.SizePt.Height));
 
                     var page = Native.FPDF_LoadPage(doc, i);
                     double h = Native.FPDF_GetPageHeightF(page);
-                    if (item.Paper is { } paper) AddPaper(page, paper, h);
+                    if (item.CanvasArea is { } canvasArea) AddCanvasPattern(page, item.Paper!, canvasArea, h);
+                    else if (item.Paper is { } paper) AddPaper(page, paper, h);
                     foreach (var stroke in item.Strokes) AddStroke(page, stroke, h);
                     Native.FPDFPage_GenerateContent(page);
                     Native.FPDF_ClosePage(page);
@@ -240,6 +256,27 @@ public static class PdfExporter
     }
 
     private static Point Flip(Point p, double pageHeight) => new(p.X, pageHeight - p.Y);
+
+    /// <summary>Leinwand: Striche relativ zum Exportbereich, normiert auf dessen Höhe (= Seitenhöhe).</summary>
+    private static Item CanvasItem(PaperPage page)
+    {
+        var area = CanvasArea(page);
+        var strokes = page.Strokes.Select(s => s.Transformed(new Vector(-area.X, -area.Y), 1 / area.Height)).ToList();
+        return new Item(null, page.Paper, strokes, area);
+    }
+
+    private static void AddCanvasPattern(nint page, Paper paper, Rect area, double pageHeight)
+    {
+        var (lines, dots) = PaperRenderer.CanvasPattern(paper, area);
+        var lineColor = paper.Style == PaperStyle.Lined ? PaperRenderer.LineColor : PaperRenderer.GridColor;
+        foreach (var l in lines)
+            AddPath(page, [Flip(l.A, pageHeight), Flip(l.B, pageHeight)], PaperRenderer.LineWidthPt, lineColor);
+        foreach (var d in dots)
+        {
+            var p = Flip(d, pageHeight);
+            AddPath(page, [p, p + new Vector(0.01, 0)], PaperRenderer.DotRadiusPt * 2, PaperRenderer.DotColor);
+        }
+    }
 
     private static void AddStroke(nint page, Stroke stroke, double pageHeight)
     {

@@ -30,7 +30,7 @@ Das Modell ist so angelegt, dass „unendliche Leinwand“ später ein weiterer 
   Version 1 bleibt lesbar); Dokumente ohne PDF → eigene Datei `.pdfp`.
 - PDF-Export setzt PDF-Seiten und Papierseiten (Raster als Vektorlinien) zusammen.
 
-## Phase 1b – Unendliche Leinwand (später)
+## Phase 1b – Unendliche Leinwand ✅
 
 Seitentyp mit verschiebbarem/zoombarem Ausschnitt, Striche in Weltkoordinaten, endloses
 Raster; Export als Ausschnitt um den Inhalt. Gestenkonflikt mit dem Geodreieck klären
